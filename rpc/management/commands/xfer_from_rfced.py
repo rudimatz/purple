@@ -80,10 +80,10 @@ class Command(BaseCommand):
         )
 
         self.get_published_rfcs()
+        self.get_in_process_docs()
 
         # TODO
-        # Get RFCs in progress
-        # Get withdrawn RFCs
+        # Get withdrawn docs
         # Handle other document types (?)
         #   >>> Counter(Index.objects.values_list('type',flat=True))
         #   Counter({'RFC': 9775, 'IEN': 208, 'BCP': 31, 'STD': 27})
@@ -107,9 +107,7 @@ class Command(BaseCommand):
         # First get published RFCs
         problematic = []
         nodraft = []
-        for row in Index.objects.filter(type="RFC", state_id=14).exclude(
-            status="NOT ISSUED"
-        ):
+        for row in rfc_qs:
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
@@ -165,3 +163,94 @@ class Command(BaseCommand):
         print("")
         print("Skipped the following known problematic drafts")
         print(sorted(problematic))
+
+    def get_in_process_docs(self):
+        ip_qs = Index.objects.filter(
+            state_id__in=[1, 2, 4, 10, 12, 13, 15, 17, 18, 22, 23, 20]
+        )
+        names = (
+            ip_qs.exclude(draft__isnull=True)
+            .exclude(draft="")
+            .exclude(pub_date__month=4, pub_date__day=1)
+            .values_list("draft", flat=True)
+        )
+        update_documents([name.strip()[:-3] for name in names])
+        # First get published RFCs
+        problematic = []
+        nodraft = []
+        for row in ip_qs:
+            is_apr1 = (
+                row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
+            ) or False
+            found_doc = None
+            if not is_apr1:
+                if row.draft is None or row.draft == "":
+                    nodraft.append(row.doc_id)
+
+                    continue  # TODO solve the problem
+                # These are no anomolies in this dataset
+
+                if row.doc_id in []:
+                    problematic.append(row.doc_id)
+                    continue  # TODO solve the problem
+                found_doc = Document.objects.filter(name=row.draft.strip()[:-3]).first()
+                if not found_doc:
+                    print(f"Skipping {row.doc_id} - problem with {row.draft}")
+                    continue
+            RfcToBe.objects.create(
+                disposition_id="in_progress",
+                is_april_first_rfc=is_apr1,
+                draft=found_doc if not is_apr1 else None,
+                rfc_number=int(row.doc_id[3:]) if row.doc_id!="RFC" else None,
+                cluster=None,  # TODO: populate by walking Clusters table
+                order_in_cluster=1,  # TODO: :point_up:
+                submitted_format=self.unknown_submitted_format,  # TODO: verify that there's nothing currently captured
+                submitted_std_level=self.todo_std_level,  # TODO
+                submitted_boilerplate=self.unknown_boilerplate,  # TODO - populate those we _do_ know
+                submitted_stream=self.todo_stream_name,  # TODO
+                intended_std_level=self.todo_std_level,  # TODO
+                intended_boilerplate=self.unknown_boilerplate,  # TODO
+                intended_stream=self.todo_stream_name,  # TODO
+                external_deadline=None,  # TODO - capture known ones?
+                internal_goal=None,  # TODO - does the rfced db capture this?
+            )
+            # TODO walk states and apply labels (with history)
+
+        print(
+            "Skipped the following as they had no draft names populated (model breaks)"
+        )
+        print(sorted(nodraft))
+        print("")
+        print("Skipped the following known problematic drafts")
+        print(sorted(problematic))
+
+    def refresh_rpc_people(self):
+        # Found by direct name match
+        people_pks = {
+            "Aaron Falk": 21226
+            "Sarah Tarrant": 131267
+            "Jean Mahoney": 114455
+            "Aaron Stone": 110093
+            "Sandy Ginoza": 104401
+            "Alice Russo": 113811
+            "Marshika Szabo": 127045
+            "Reuben Esparza": 127195
+            "Karen Moore": 127686
+            "Megan Ferguson": 128027
+            "Lynne Bartholomew": 128311
+            "Rebecca VanRheenen": 130328
+            "Alanna Paloma": 130334
+            "Chris Smiley": 130367
+            "Reuben Esparza": 131485
+            "Madison Church": 134025
+        }
+        # Found by manual searching
+        people_pks["Bob Braden"] = 5436 # "Robert Braden"
+        people_pks["Jon Postel"] = 419 # "Dr. Jon Postel"
+        people_pks["Joyce Reynolds"] = 2804 # "Joyce K. Reynolds"
+        people_pks["Alice Hagens"] = 113811 # "Alice Russo"
+        # There are 22 "Names" from the rfced Editors table not yet found in the datatracker
+
+
+        # Get or create DatatrackerPersons
+        # Get of create RpcPersons and attach them
