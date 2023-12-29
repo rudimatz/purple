@@ -5,13 +5,14 @@ import rpcapi_client
 
 from django.core.management.base import BaseCommand
 
-from datatracker.models import Document
+from datatracker.models import DatatrackerPerson, Document
 from datatracker.rpcapi import with_rpcapi
 
 from rfced.models import Index
 
 from ...models import (
     RfcToBe,
+    RpcPerson,
     SourceFormatName,
     StdLevelName,
     StreamName,
@@ -52,8 +53,32 @@ def update_documents(docnames, *, rpcapi: rpcapi_client.DefaultApi):
 class Command(BaseCommand):
     help = "Transfer data from a dump of the current RPC production database"
 
-    def handle(self, *args, **options):
-        assert RfcToBe.objects.count() == 0
+    def __init__(self, *args, **kwargs):
+        self.people_pks = {
+            # Direct name matches in datatracker
+            "Aaron Falk": 21226,
+            "Sarah Tarrant": 131267,
+            "Jean Mahoney": 114455,
+            "Aaron Stone": 110093,
+            "Sandy Ginoza": 104401,
+            "Alice Russo": 113811,
+            "Marshika Szabo": 127045,
+            "Reuben Esparza": 127195,
+            "Karen Moore": 127686,
+            "Megan Ferguson": 128027,
+            "Lynne Bartholomew": 128311,
+            "Rebecca VanRheenen": 130328,
+            "Alanna Paloma": 130334,
+            "Chris Smiley": 130367,
+            "Reuben Esparza": 131485,
+            "Madison Church": 134025,
+            # Found by manual searching
+            "Bob Braden": 5436,  # "Robert Braden"
+            "Jon Postel": 419,  # "Dr. Jon Postel"
+            "Joyce Reynolds": 2804,  # "Joyce K. Reynolds"
+            "Alice Hagens": 113811,  # "Alice Russo"
+            # There are 22 "Names" from the rfced Editors table not yet found in the datatracker
+        }
 
         self.todo_std_level, _ = StdLevelName.objects.get_or_create(
             slug="todo",
@@ -79,14 +104,31 @@ class Command(BaseCommand):
             desc="Don't know what formats were submitted",
         )
 
+    def handle(self, *args, **options):
+        assert RfcToBe.objects.count() == 0
+
+        self.build_rpc_people()
         self.get_published_rfcs()
         self.get_in_process_docs()
+        self.get_assignments()
 
         # TODO
         # Get withdrawn docs
         # Handle other document types (?)
         #   >>> Counter(Index.objects.values_list('type',flat=True))
         #   Counter({'RFC': 9775, 'IEN': 208, 'BCP': 31, 'STD': 27})
+
+    def build_rpc_people(self):
+        for name in self.people_pks:
+            rpc_person, _ = RpcPerson.objects.get_or_create(
+                datatracker_person,
+                _=DatatrackerPerson.objects.get_or_create(
+                    datatracker_id=self.people_pks[name]
+                ),
+                defaults={
+                    # TODO: right now leave all these to the database defaults.
+                },
+            )
 
     def get_published_rfcs(self):
         rfc_qs = Index.objects.filter(type="RFC", state_id=14).exclude(
@@ -201,7 +243,7 @@ class Command(BaseCommand):
                 disposition_id="in_progress",
                 is_april_first_rfc=is_apr1,
                 draft=found_doc if not is_apr1 else None,
-                rfc_number=int(row.doc_id[3:]) if row.doc_id!="RFC" else None,
+                rfc_number=int(row.doc_id[3:]) if row.doc_id != "RFC" else None,
                 cluster=None,  # TODO: populate by walking Clusters table
                 order_in_cluster=1,  # TODO: :point_up:
                 submitted_format=self.unknown_submitted_format,  # TODO: verify that there's nothing currently captured
@@ -224,33 +266,5 @@ class Command(BaseCommand):
         print("Skipped the following known problematic drafts")
         print(sorted(problematic))
 
-    def refresh_rpc_people(self):
-        # Found by direct name match
-        people_pks = {
-            "Aaron Falk": 21226
-            "Sarah Tarrant": 131267
-            "Jean Mahoney": 114455
-            "Aaron Stone": 110093
-            "Sandy Ginoza": 104401
-            "Alice Russo": 113811
-            "Marshika Szabo": 127045
-            "Reuben Esparza": 127195
-            "Karen Moore": 127686
-            "Megan Ferguson": 128027
-            "Lynne Bartholomew": 128311
-            "Rebecca VanRheenen": 130328
-            "Alanna Paloma": 130334
-            "Chris Smiley": 130367
-            "Reuben Esparza": 131485
-            "Madison Church": 134025
-        }
-        # Found by manual searching
-        people_pks["Bob Braden"] = 5436 # "Robert Braden"
-        people_pks["Jon Postel"] = 419 # "Dr. Jon Postel"
-        people_pks["Joyce Reynolds"] = 2804 # "Joyce K. Reynolds"
-        people_pks["Alice Hagens"] = 113811 # "Alice Russo"
-        # There are 22 "Names" from the rfced Editors table not yet found in the datatracker
-
-
-        # Get or create DatatrackerPersons
-        # Get of create RpcPersons and attach them
+    def get_assignments(self):
+        pass
