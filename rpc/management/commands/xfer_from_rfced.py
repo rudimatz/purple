@@ -8,9 +8,10 @@ from django.core.management.base import BaseCommand
 from datatracker.models import DatatrackerPerson, Document
 from datatracker.rpcapi import with_rpcapi
 
-from rfced.models import Index
+from rfced.models import EditorAssignments, Editors, Index
 
 from ...models import (
+    Assignment,
     RfcToBe,
     RpcPerson,
     SourceFormatName,
@@ -105,8 +106,6 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        assert RfcToBe.objects.count() == 0
-
         self.build_rpc_people()
         self.get_published_rfcs()
         self.get_in_process_docs()
@@ -120,11 +119,11 @@ class Command(BaseCommand):
 
     def build_rpc_people(self):
         for name in self.people_pks:
+            datatracker_person, _ = DatatrackerPerson.objects.get_or_create(
+                datatracker_id=self.people_pks[name]
+            )
             rpc_person, _ = RpcPerson.objects.get_or_create(
-                datatracker_person,
-                _=DatatrackerPerson.objects.get_or_create(
-                    datatracker_id=self.people_pks[name]
-                ),
+                datatracker_person=datatracker_person,
                 defaults={
                     # TODO: right now leave all these to the database defaults.
                 },
@@ -179,7 +178,7 @@ class Command(BaseCommand):
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
                     continue
-            RfcToBe.objects.create(
+            RfcToBe.objects.get_or_create(
                 disposition_id="published",
                 is_april_first_rfc=is_apr1,
                 draft=found_doc if not is_apr1 else None,
@@ -239,7 +238,7 @@ class Command(BaseCommand):
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
                     continue
-            RfcToBe.objects.create(
+            RfcToBe.objects.get_or_create(
                 disposition_id="in_progress",
                 is_april_first_rfc=is_apr1,
                 draft=found_doc if not is_apr1 else None,
@@ -267,4 +266,34 @@ class Command(BaseCommand):
         print(sorted(problematic))
 
     def get_assignments(self):
-        pass
+        rpcperson_by_initials = dict()
+        for row in Editors.objects.all():
+            if row.name in self.people_pks:
+                rpcperson_by_initials[row.initials] = RpcPerson.objects.get(
+                    datatracker_person__datatracker_id=self.people_pks[row.name]
+                )
+        # Focusing first on in-process docs - it's unclear what to do about past assignments
+        for doc in RfcToBe.objects.filter(disposition_id="in_progress"):
+            assignments = EditorAssignments.objects.filter(doc_key=doc.pk).order_by(
+                "-role_key"
+            )
+            active_assignment = None
+            for assignment in assignments:
+                if assignment.initials == "XX":
+                    continue
+                if assignment.initials in rpcperson_by_initials:
+                    if not active_assignment:
+                        active_assignment = assignment
+                    Assignment.objects.get_or_create(
+                        rfc_to_be=doc,
+                        person=rpcperson_by_initials[assignment.initials],
+                        role_id={
+                            1: "first_editor",
+                            2: "second_editor",
+                            3: "final_review_editor",
+                            4: "publisher",
+                        }[assignment.role_key],
+                        state="assigned"
+                        if assignment == active_assignment
+                        else "done",  # TODO: should this use "in progress"?
+                    )
