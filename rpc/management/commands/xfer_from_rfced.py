@@ -8,7 +8,7 @@ from django.core.management.base import BaseCommand
 from datatracker.models import DatatrackerPerson, Document
 from datatracker.rpcapi import with_rpcapi
 
-from rfced.models import EditorAssignments, Editors, Index
+from rfced.models import EditorAssignments, Editors, Index, WorkingGroup
 
 from ...models import (
     Assignment,
@@ -19,6 +19,15 @@ from ...models import (
     StreamName,
     TlpBoilerplateChoiceName,
 )
+
+
+@with_rpcapi
+def get_rfc_original_streams(*, rpcapi: rpcapi_client.DefaultApi):
+    original_stream_list = rpcapi.get_rfc_original_streams().original_stream
+    original_streams = dict()
+    for item in original_stream_list:
+        original_streams[item.rfc_number] = item.stream
+    return original_streams
 
 
 @with_rpcapi
@@ -81,12 +90,6 @@ class Command(BaseCommand):
             # There are 22 "Names" from the rfced Editors table not yet found in the datatracker
         }
 
-        self.todo_stream_name, _ = StreamName.objects.get_or_create(
-            slug="todo",
-            name="Todo-streamname",
-            desc="Don't understand streams yet",
-        )
-
         self.unknown_boilerplate, _ = TlpBoilerplateChoiceName.objects.get_or_create(
             slug="unknown",
             name="Boilerplate Unknown",
@@ -138,6 +141,7 @@ class Command(BaseCommand):
         )
         # All remaining draft names include version numbers - strip them
         update_documents([name.strip()[:-3] for name in names])
+        original_streams = get_rfc_original_streams()
 
         # First get published RFCs
         problematic = []
@@ -172,11 +176,12 @@ class Command(BaseCommand):
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
                     continue
+            rfc_number = int(row.doc_id[3:])
             RfcToBe.objects.get_or_create(
                 disposition_id="published",
                 is_april_first_rfc=is_apr1,
                 draft=found_doc if not is_apr1 else None,
-                rfc_number=int(row.doc_id[3:]),
+                rfc_number=rfc_number,
                 cluster=None,  # TODO: populate by walking Clusters table
                 order_in_cluster=1,  # TODO: :point_up:
                 submitted_format=self.unknown_submitted_format,  # TODO: verify that there's nothing currently captured
@@ -184,23 +189,27 @@ class Command(BaseCommand):
                     self.dt_stdlevelname_slug(row.pub_status)
                 ),  # Not sure this is right - may need to go find last version of draft instead?
                 submitted_boilerplate=self.unknown_boilerplate,  # TODO - populate those we _do_ know
-                submitted_stream=self.todo_stream_name,  # TODO
+                submitted_stream=StreamName.objects.from_slug(
+                    found_doc.stream if found_doc else "ise"
+                ),
                 intended_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.status)
                 ),  # Again not sure this is right - current status may belong to RFC in datatracker
                 intended_boilerplate=self.unknown_boilerplate,  # TODO
-                intended_stream=self.todo_stream_name,  # TODO
+                intended_stream=StreamName.objects.from_slug(
+                    original_streams[rfc_number]
+                ),
                 external_deadline=None,  # TODO - capture known ones?
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
             # TODO walk states and apply labels (with history)
 
         print(
-            "Skipped the following as they had no draft names populated (model breaks)"
+            f"Skipped the following {len(nodraft)} items as they had no draft names populated (model breaks)"
         )
         print(sorted(nodraft))
         print("")
-        print("Skipped the following known problematic drafts")
+        print("Skipped the following known problematic items")
         print(sorted(problematic))
 
     def get_in_process_docs(self):
@@ -248,23 +257,27 @@ class Command(BaseCommand):
                     self.dt_stdlevelname_slug(row.pub_status)
                 ),  # Not sure this is right - may need to go find last version of draft instead?
                 submitted_boilerplate=self.unknown_boilerplate,  # TODO - populate those we _do_ know
-                submitted_stream=self.todo_stream_name,  # TODO
+                submitted_stream=StreamName.objects.from_slug(
+                    found_doc.stream if found_doc else "ise"
+                ),
                 intended_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.status)
                 ),  # Closer to sure this is right
                 intended_boilerplate=self.unknown_boilerplate,  # TODO
-                intended_stream=self.todo_stream_name,  # TODO
+                intended_stream=StreamName.objects.from_slug(
+                    found_doc.stream if found_doc else "ise"
+                ),  # TODO - parse index.source instead
                 external_deadline=None,  # TODO - capture known ones?
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
             # TODO walk states and apply labels (with history)
 
         print(
-            "Skipped the following as they had no draft names populated (model breaks)"
+            f"Skipped the following {len(nodraft)} items as they had no draft names populated (model breaks)"
         )
         print(sorted(nodraft))
         print("")
-        print("Skipped the following known problematic drafts")
+        print("Skipped the following known problematic items")
         print(sorted(problematic))
 
     def get_assignments(self):
