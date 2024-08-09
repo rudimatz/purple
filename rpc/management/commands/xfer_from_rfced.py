@@ -180,10 +180,14 @@ class Command(BaseCommand):
                 cluster=None,  # TODO: populate by walking Clusters table
                 order_in_cluster=1,  # TODO: :point_up:
                 submitted_format=self.unknown_submitted_format,  # TODO: verify that there's nothing currently captured
-                submitted_std_level=StdLevelName.objects.from_slug(self.dt_stdlevelname_slug(row.pub_status)),  # Not sure this is right - may need to go find last version of draft instead?
+                submitted_std_level=StdLevelName.objects.from_slug(
+                    self.dt_stdlevelname_slug(row.pub_status)
+                ),  # Not sure this is right - may need to go find last version of draft instead?
                 submitted_boilerplate=self.unknown_boilerplate,  # TODO - populate those we _do_ know
                 submitted_stream=self.todo_stream_name,  # TODO
-                intended_std_level=StdLevelName.objects.from_slug(self.dt_stdlevelname_slug(row.status)),  # Again not sure this is right - current status may belong to RFC in datatracker
+                intended_std_level=StdLevelName.objects.from_slug(
+                    self.dt_stdlevelname_slug(row.status)
+                ),  # Again not sure this is right - current status may belong to RFC in datatracker
                 intended_boilerplate=self.unknown_boilerplate,  # TODO
                 intended_stream=self.todo_stream_name,  # TODO
                 external_deadline=None,  # TODO - capture known ones?
@@ -240,10 +244,14 @@ class Command(BaseCommand):
                 cluster=None,  # TODO: populate by walking Clusters table
                 order_in_cluster=1,  # TODO: :point_up:
                 submitted_format=self.unknown_submitted_format,  # TODO: verify that there's nothing currently captured
-                submitted_std_level=StdLevelName.objects.from_slug(self.dt_stdlevelname_slug(row.pub_status)),  # Not sure this is right - may need to go find last version of draft instead?
+                submitted_std_level=StdLevelName.objects.from_slug(
+                    self.dt_stdlevelname_slug(row.pub_status)
+                ),  # Not sure this is right - may need to go find last version of draft instead?
                 submitted_boilerplate=self.unknown_boilerplate,  # TODO - populate those we _do_ know
                 submitted_stream=self.todo_stream_name,  # TODO
-                intended_std_level=StdLevelName.objects.from_slug(self.dt_stdlevelname_slug(row.status)),  # Closer to sure this is right
+                intended_std_level=StdLevelName.objects.from_slug(
+                    self.dt_stdlevelname_slug(row.status)
+                ),  # Closer to sure this is right
                 intended_boilerplate=self.unknown_boilerplate,  # TODO
                 intended_stream=self.todo_stream_name,  # TODO
                 external_deadline=None,  # TODO - capture known ones?
@@ -287,14 +295,14 @@ class Command(BaseCommand):
                             3: "final_review_editor",
                             4: "publisher",
                         }[assignment.role_key],
-                        state="assigned"
-                        if assignment == active_assignment
-                        else "done",  # TODO: should this use "in progress"?
+                        state=(
+                            "assigned" if assignment == active_assignment else "done"
+                        ),  # TODO: should this use "in progress"?
                     )
 
-    def dt_stdlevelname_slug(self, index_name:str)->str:
-        """ Returns the datatracker StdLevelName slug matching strings from the Index table
-            ['bcp', 'ds', 'exp', 'hist', 'inf', 'std', 'ps', 'unkn']
+    def dt_stdlevelname_slug(self, index_name: str) -> str:
+        """Returns the datatracker StdLevelName slug matching strings from the Index table
+        ['bcp', 'ds', 'exp', 'hist', 'inf', 'std', 'ps', 'unkn']
         """
         name_map = {
             "best current practice": "bcp",
@@ -307,4 +315,4 @@ class Command(BaseCommand):
             "historic": "hist",
             "experimental": "exp",
         }
-        return name_map.get(index_name.strip().lower(),"unkn")
+        return name_map.get(index_name.strip().lower(), "unkn")

@@ -103,7 +103,7 @@ DATABASES = {
     },
 }
 
-DATABASE_ROUTERS=[ "rfced.routers.RfcedRouter" ]
+DATABASE_ROUTERS = ["rfced.routers.RfcedRouter"]
 
 # Authentication
 AUTHENTICATION_BACKENDS = (
