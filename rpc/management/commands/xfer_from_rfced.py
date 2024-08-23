@@ -265,8 +265,8 @@ class Command(BaseCommand):
                 ),  # Closer to sure this is right
                 intended_boilerplate=self.unknown_boilerplate,  # TODO
                 intended_stream=StreamName.objects.from_slug(
-                    # this will get the stream the doc is in as of when the import is run
-                    # which may not be right if we really want it to be stream at time of publication
+                    # this is the stream as of the time of the import run
+                    # which makes sense for documents that are in progress
                     self.stream_slug_from_index(row)
                 ),
                 external_deadline=None,  # TODO - capture known ones?
