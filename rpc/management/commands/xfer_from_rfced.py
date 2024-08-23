@@ -90,16 +90,12 @@ class Command(BaseCommand):
             # There are 22 "Names" from the rfced Editors table not yet found in the datatracker
         }
 
-        self.unknown_boilerplate, _ = TlpBoilerplateChoiceName.objects.get_or_create(
-            slug="unknown",
-            name="Boilerplate Unknown",
-            desc="Don't know what boilerplate was used",
-        )
-
-        self.unknown_submitted_format, _ = SourceFormatName.objects.get_or_create(
-            slug="unknown",
-            name="Submitted Format Unknown",
-            desc="Don't know what formats were submitted",
+        self.unknown_boilerplate = TlpBoilerplateChoiceName.objects.get(slug="unknown")
+        SourceFormatName.objects.get_or_create(
+            slug="nroff",
+            name="nroff",
+            desc="Source was submitted in nroff",
+            used=False, # THIS was why we needed to add used...
         )
 
     def handle(self, *args, **options):
@@ -184,7 +180,7 @@ class Command(BaseCommand):
                 rfc_number=rfc_number,
                 cluster=None,  # TODO: populate by walking Clusters table
                 order_in_cluster=1,  # TODO: :point_up:
-                submitted_format=self.unknown_submitted_format,  # TODO: verify that there's nothing currently captured
+                submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.pub_status)
                 ),  # Not sure this is right - may need to go find last version of draft instead?
@@ -252,7 +248,7 @@ class Command(BaseCommand):
                 rfc_number=int(row.doc_id[3:]) if row.doc_id != "RFC" else None,
                 cluster=None,  # TODO: populate by walking Clusters table
                 order_in_cluster=1,  # TODO: :point_up:
-                submitted_format=self.unknown_submitted_format,  # TODO: verify that there's nothing currently captured
+                submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.pub_status)
                 ),  # Not sure this is right - may need to go find last version of draft instead?
@@ -344,3 +340,20 @@ class Command(BaseCommand):
         if not ssp_id in mapping:
             raise Exception("Unexpected stream (ssp_id = {ssp_id}) encountered")
         return mapping[ssp_id]
+
+    def source_format_id_from_index(self, index):
+        # Note that this field in the old database conflates what format was submitted,
+        # where in the process of conversion a document is, and what format was converted
+        # into, and it _loses_ information along the way - we can only migrate what it knows
+        # at the time of migration, history before that does not exist in that database.
+        src = index.xml_file
+        mapping = {
+            0: "txt", # Verify with Jean that this is the right interpretation
+            1: "xml-v2",
+            2: "nroff",
+            5: "xml-v3",
+        }
+        if src in mapping:
+            return mapping[src]
+        else:
+            return "unknown"
