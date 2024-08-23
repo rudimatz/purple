@@ -265,8 +265,10 @@ class Command(BaseCommand):
                 ),  # Closer to sure this is right
                 intended_boilerplate=self.unknown_boilerplate,  # TODO
                 intended_stream=StreamName.objects.from_slug(
-                    found_doc.stream if found_doc else "ise"
-                ),  # TODO - parse index.source instead
+                    # this will get the stream the doc is in as of when the import is run
+                    # which may not be right if we really want it to be stream at time of publication
+                    self.stream_slug_from_index(row)
+                ),
                 external_deadline=None,  # TODO - capture known ones?
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
@@ -329,3 +331,16 @@ class Command(BaseCommand):
             "experimental": "exp",
         }
         return name_map.get(index_name.strip().lower(), "unkn")
+
+    def stream_slug_from_index(self, index):
+        ssp_id = WorkingGroup.objects.get(wg_name=index.source).ssp_id
+        mapping = {
+            1: "ietf",
+            3: "iab",
+            4: "irtf",
+            6: "ise",
+            8: "editorial",
+        }
+        if not ssp_id in mapping:
+            raise Exception("Unexpected stream (ssp_id = {ssp_id}) encountered")
+        return mapping[ssp_id]
