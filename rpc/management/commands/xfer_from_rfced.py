@@ -90,7 +90,6 @@ class Command(BaseCommand):
             # There are 22 "Names" from the rfced Editors table not yet found in the datatracker
         }
 
-        self.unknown_boilerplate = TlpBoilerplateChoiceName.objects.get(slug="unknown")
         SourceFormatName.objects.get_or_create(
             slug="nroff",
             name="nroff",
@@ -184,14 +183,14 @@ class Command(BaseCommand):
                 submitted_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.pub_status)
                 ),  # Not sure this is right - may need to go find last version of draft instead?
-                submitted_boilerplate=self.unknown_boilerplate,  # TODO - populate those we _do_ know
+                submitted_boilerplate_id="unknown",
                 submitted_stream=StreamName.objects.from_slug(
                     found_doc.stream if found_doc else "ise"
                 ),
                 intended_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.status)
                 ),  # Again not sure this is right - current status may belong to RFC in datatracker
-                intended_boilerplate=self.unknown_boilerplate,  # TODO
+                intended_boilerplate_id="unknown",
                 intended_stream=StreamName.objects.from_slug(
                     original_streams[rfc_number]
                 ),
@@ -252,14 +251,14 @@ class Command(BaseCommand):
                 submitted_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.pub_status)
                 ),  # Not sure this is right - may need to go find last version of draft instead?
-                submitted_boilerplate=self.unknown_boilerplate,  # TODO - populate those we _do_ know
+                submitted_boilerplate_id="unknown",
                 submitted_stream=StreamName.objects.from_slug(
                     found_doc.stream if found_doc else "ise"
                 ),
                 intended_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.status)
                 ),  # Closer to sure this is right
-                intended_boilerplate=self.unknown_boilerplate,  # TODO
+                intended_boilerplate_id="unknown",
                 intended_stream=StreamName.objects.from_slug(
                     # this is the stream as of the time of the import run
                     # which makes sense for documents that are in progress
