@@ -111,10 +111,17 @@ class Command(BaseCommand):
         self.import_clusters()
 
         # TODO
+
         # Get withdrawn docs
+
+        # Account for "not issued" index rows (did any have any work to capture?)
+
         # Handle other document types (?)
         #   >>> Counter(Index.objects.values_list('type',flat=True))
         #   Counter({'RFC': 9775, 'IEN': 208, 'BCP': 31, 'STD': 27})
+        # Maybe make a Subseries model.
+
+        # END TODO
 
     def build_rpc_people(self):
         for name in self.people_pks:
@@ -145,35 +152,34 @@ class Command(BaseCommand):
         update_documents([name.strip()[:-3] for name in names])
         original_streams = get_rfc_original_streams()
 
-        # First get published RFCs
-        problematic = []
-        nodraft = []
         for row in rfc_qs:
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
             found_doc = None
-            if not is_apr1:
-                if row.draft is None or row.draft == "":
-                    nodraft.append(row.doc_id)
+            draft = row.draft
+            if draft == "":
+                draft = None
 
-                    continue  # TODO solve the problem
-                # These are anomolies in the incoming data
-                # Some are missing drafts, some are republications of RFCs because of errors
-                # ('RFC3018', 'draft-bogdanov-umsp')
-                # ('RFC2605', 'draft-ietf-madman-dsa-mib-1')
-                # ('RFC6019', 'rfc4049bis')
-                # ('RFC6342', 'draft-ietf-v6ops-v6-in-mobile-networks-rfc6312bis')
-                # ('RFC7159', 'draft-ietf-json-rfc4627bis-rfc7159bis')
-                if row.doc_id in [
-                    "RFC2605",
-                    "RFC3018",
-                    "RFC6019",
-                    "RFC6342",
-                    "RFC7159",
-                ]:
-                    problematic.append(row.doc_id)
-                    continue  # TODO solve the problem
+            # These are anomolies in the incoming data
+            # Some are missing drafts, some are republications of RFCs because of errors
+            # TODO: Add comments about these, and draft=Nones
+            # ('RFC3018', 'draft-bogdanov-umsp')
+            # ('RFC2605', 'draft-ietf-madman-dsa-mib-1')
+            # ('RFC6019', 'rfc4049bis')
+            # ('RFC6342', 'draft-ietf-v6ops-v6-in-mobile-networks-rfc6312bis')
+            # ('RFC7159', 'draft-ietf-json-rfc4627bis-rfc7159bis')
+            if row.doc_id in [
+                "RFC2605",
+                "RFC3018",
+                "RFC6019",
+                "RFC6342",
+                "RFC7159",
+            ]:
+                draft = None
+            # TODO: Add comments about these, and draft=Nones
+            found_doc = None
+            if not is_apr1 and row.draft is not None and row.draft != "":
                 found_doc = Document.objects.filter(name=row.draft.strip()[:-3]).first()
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
@@ -182,7 +188,7 @@ class Command(BaseCommand):
             RfcToBe.objects.get_or_create(
                 disposition_id="published",
                 is_april_first_rfc=is_apr1,
-                draft=found_doc if not is_apr1 else None,
+                draft=found_doc,
                 rfc_number=rfc_number,
                 submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
@@ -204,14 +210,6 @@ class Command(BaseCommand):
             )
             # TODO walk states and apply labels (with history)
 
-        print(
-            f"Skipped the following {len(nodraft)} items as they had no draft names populated (model breaks)"
-        )
-        print(sorted(nodraft))
-        print("")
-        print("Skipped the following known problematic items")
-        print(sorted(problematic))
-
     def get_in_process_docs(self):
         ip_qs = Index.objects.filter(type="RFC", state_id__in=IN_PROGRESS_STATES)
         names = (
@@ -221,24 +219,13 @@ class Command(BaseCommand):
             .values_list("draft", flat=True)
         )
         update_documents([name.strip()[:-3] for name in names])
-        # First get published RFCs
-        problematic = []
-        nodraft = []
+
         for row in ip_qs:
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
             found_doc = None
-            if not is_apr1:
-                if row.draft is None or row.draft == "":
-                    nodraft.append(row.doc_id)
-
-                    continue  # TODO solve the problem
-                # These are no anomolies in this dataset
-
-                if row.doc_id in []:
-                    problematic.append(row.doc_id)
-                    continue  # TODO solve the problem
+            if not is_apr1 and row.draft is not None and row.draft != "":
                 found_doc = Document.objects.filter(name=row.draft.strip()[:-3]).first()
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
@@ -246,7 +233,7 @@ class Command(BaseCommand):
             RfcToBe.objects.get_or_create(
                 disposition_id="in_progress",
                 is_april_first_rfc=is_apr1,
-                draft=found_doc if not is_apr1 else None,
+                draft=found_doc,
                 rfc_number=int(row.doc_id[3:]) if row.doc_id != "RFC" else None,
                 submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
@@ -270,13 +257,6 @@ class Command(BaseCommand):
             )
             # TODO walk states and apply labels (with history)
 
-        print(
-            f"Skipped the following {len(nodraft)} items as they had no draft names populated (model breaks)"
-        )
-        print(sorted(nodraft))
-        print("")
-        print("Skipped the following known problematic items")
-        print(sorted(problematic))
 
     def get_assignments(self):
         rpcperson_by_initials = dict()
