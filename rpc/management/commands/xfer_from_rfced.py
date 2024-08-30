@@ -136,6 +136,16 @@ class Command(BaseCommand):
             )
 
     def get_published_rfcs(self):
+        RFCS_WITH_FAKE_DRAFTNAMES = [
+            "RFC2605",  # draft-ietf-madman-dsa-mib-1 :
+            "RFC3018",  # draft-bogdanov-umsp :
+            "RFC5540",  # draft-rfc-editor-40-anniversary-00 : developed by rfc-editor without submitting a draft
+            "RFC6019",  # rfc4049bis :
+            "RFC6342",  # draft-ietf-v6ops-v6-in-mobile-networks-rfc6312bis :
+            "RFC6353",  # draft-ietf-isms-dtls-tm-rfc5953bis-00 :
+            "RFC7159",  # draft-ietf-json-rfc4627bis-rfc7159bis :
+            "RFC7396",  # draft-ietf-rfc7386bis-00 :
+        ]
         rfc_qs = Index.objects.filter(
             type="RFC", state_id__in=PUBLISHED_STATES
         ).exclude(status="NOT ISSUED")
@@ -143,9 +153,7 @@ class Command(BaseCommand):
             rfc_qs.exclude(draft__isnull=True)
             .exclude(draft="")
             .exclude(pub_date__month=4, pub_date__day=1)
-            .exclude(
-                doc_id__in=["RFC2605", "RFC3018", "RFC6019", "RFC6342", "RFC7159"]
-            )  # anomalous draft values
+            .exclude(doc_id__in=RFCS_WITH_FAKE_DRAFTNAMES)
             .values_list("draft", flat=True)
         )
         # All remaining draft names include version numbers - strip them
@@ -157,33 +165,18 @@ class Command(BaseCommand):
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
             found_doc = None
-            draft = row.draft
-            if draft == "":
-                draft = None
-
-            # These are anomolies in the incoming data
-            # Some are missing drafts, some are republications of RFCs because of errors
-            # TODO: Add comments about these, and draft=Nones
-            # ('RFC3018', 'draft-bogdanov-umsp')
-            # ('RFC2605', 'draft-ietf-madman-dsa-mib-1')
-            # ('RFC6019', 'rfc4049bis')
-            # ('RFC6342', 'draft-ietf-v6ops-v6-in-mobile-networks-rfc6312bis')
-            # ('RFC7159', 'draft-ietf-json-rfc4627bis-rfc7159bis')
-            if row.doc_id in [
-                "RFC2605",
-                "RFC3018",
-                "RFC6019",
-                "RFC6342",
-                "RFC7159",
-            ]:
-                draft = None
-            # TODO: Add comments about these, and draft=Nones
-            found_doc = None
-            if not is_apr1 and row.draft is not None and row.draft != "":
+            if (
+                not row.doc_id in RFCS_WITH_FAKE_DRAFTNAMES
+                and not is_apr1
+                and row.draft is not None
+                and row.draft != ""
+            ):
                 found_doc = Document.objects.filter(name=row.draft.strip()[:-3]).first()
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
                     continue
+            # TODO: Add comments about fake draft names
+            # TODO: Add comments about other draft=None
             rfc_number = int(row.doc_id[3:])
             RfcToBe.objects.get_or_create(
                 disposition_id="published",
@@ -256,7 +249,6 @@ class Command(BaseCommand):
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
             # TODO walk states and apply labels (with history)
-
 
     def get_assignments(self):
         rpcperson_by_initials = dict()
