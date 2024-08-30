@@ -1,6 +1,7 @@
 # Copyright The IETF Trust 2023, All Rights Reserved
 # -*- coding: utf-8 -*-
 
+from collections import defaultdict, namedtuple
 import rpcapi_client
 
 from django.core.management.base import BaseCommand
@@ -8,17 +9,22 @@ from django.core.management.base import BaseCommand
 from datatracker.models import DatatrackerPerson, Document
 from datatracker.rpcapi import with_rpcapi
 
-from rfced.models import EditorAssignments, Editors, Index, WorkingGroup
+from rfced.models import Clusters, EditorAssignments, Editors, Index, WorkingGroup
 
 from ...models import (
     Assignment,
+    Cluster,
+    ClusterMember,
     RfcToBe,
     RpcPerson,
     SourceFormatName,
     StdLevelName,
     StreamName,
-    TlpBoilerplateChoiceName,
 )
+
+# Arcana
+IN_PROGRESS_STATES = [1, 2, 4, 10, 12, 13, 15, 17, 18, 22, 23, 20]
+PUBLISHED_STATES = [14]
 
 
 @with_rpcapi
@@ -94,7 +100,7 @@ class Command(BaseCommand):
             slug="nroff",
             name="nroff",
             desc="Source was submitted in nroff",
-            used=False, # THIS was why we needed to add used...
+            used=False,  # THIS was why we needed to add used...
         )
 
     def handle(self, *args, **options):
@@ -102,6 +108,7 @@ class Command(BaseCommand):
         self.get_published_rfcs()
         self.get_in_process_docs()
         self.get_assignments()
+        self.import_clusters()
 
         # TODO
         # Get withdrawn docs
@@ -122,9 +129,9 @@ class Command(BaseCommand):
             )
 
     def get_published_rfcs(self):
-        rfc_qs = Index.objects.filter(type="RFC", state_id=14).exclude(
-            status="NOT ISSUED"
-        )
+        rfc_qs = Index.objects.filter(
+            type="RFC", state_id__in=PUBLISHED_STATES
+        ).exclude(status="NOT ISSUED")
         names = (
             rfc_qs.exclude(draft__isnull=True)
             .exclude(draft="")
@@ -177,8 +184,6 @@ class Command(BaseCommand):
                 is_april_first_rfc=is_apr1,
                 draft=found_doc if not is_apr1 else None,
                 rfc_number=rfc_number,
-                cluster=None,  # TODO: populate by walking Clusters table
-                order_in_cluster=1,  # TODO: :point_up:
                 submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.pub_status)
@@ -208,9 +213,7 @@ class Command(BaseCommand):
         print(sorted(problematic))
 
     def get_in_process_docs(self):
-        ip_qs = Index.objects.filter(
-            state_id__in=[1, 2, 4, 10, 12, 13, 15, 17, 18, 22, 23, 20]
-        )
+        ip_qs = Index.objects.filter(type="RFC", state_id__in=IN_PROGRESS_STATES)
         names = (
             ip_qs.exclude(draft__isnull=True)
             .exclude(draft="")
@@ -245,8 +248,6 @@ class Command(BaseCommand):
                 is_april_first_rfc=is_apr1,
                 draft=found_doc if not is_apr1 else None,
                 rfc_number=int(row.doc_id[3:]) if row.doc_id != "RFC" else None,
-                cluster=None,  # TODO: populate by walking Clusters table
-                order_in_cluster=1,  # TODO: :point_up:
                 submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.pub_status)
@@ -347,7 +348,7 @@ class Command(BaseCommand):
         # at the time of migration, history before that does not exist in that database.
         src = index.xml_file
         mapping = {
-            0: "txt", # Verify with Jean that this is the right interpretation
+            0: "txt",  # Verify with Jean that this is the right interpretation
             1: "xml-v2",
             2: "nroff",
             5: "xml-v3",
@@ -356,3 +357,57 @@ class Command(BaseCommand):
             return mapping[src]
         else:
             return "unknown"
+
+    def import_clusters(self):
+        garbage_in = {
+            "draft-draft-ietf-teas-rfc8776-update": "draft-ietf-teas-rfc8776-update",
+            "draft-ietf-ldapbis-syntaxes+": "draft-ietf-ldapbis-syntaxes",
+        }
+        draft_names = set(Clusters.objects.values_list("draft_base", flat=True))
+        for bad_name in garbage_in.keys():
+            draft_names.discard(bad_name)
+        for good_name in garbage_in.values():
+            draft_names.add(good_name)
+        update_documents(list(draft_names))
+        ClusterInfo = namedtuple("ClusterInfo", ["document", "order_token"])
+        cluster_docs = defaultdict(set)
+        for offset, cluster_member in enumerate(
+            Clusters.objects.exclude(cluster_id=""), start=50000
+        ):
+            index_row_qs = Index.objects.filter(
+                type="RFC",
+                state_id__in=IN_PROGRESS_STATES + PUBLISHED_STATES,
+            ).filter(draft__regex=r"^" + cluster_member.draft_base + r"-\d\d$")
+            if index_row_qs.count() > 1:
+                print(f"Unexpected Index matches for {cluster_member.draft_base}")
+                for i in index_row_qs:
+                    print(f"{i.pk} {i.draft} {i.state_id}, {i.doc_id}")
+                exit(-1)
+            index_row = index_row_qs.first()
+            if index_row is not None and index_row.doc_id not in [None, "", "RFC"]:
+                order_token = int(index_row.doc_id[3:])  # the RFC number
+            else:
+                # Document is not yet in queue (index_row is None) or
+                # no RFC number is assigned yet - we are arbitrarily ordering these initially
+                # to come after the ones that have RFC numbers in the order they appeared
+                # in the Clusters table. The RPC will manually reorder after import if
+                # necessary.
+                order_token = offset
+            name = cluster_member.draft_base
+            if name in garbage_in:
+                name = garbage_in[name]
+            cluster_docs[int(cluster_member.cluster_id[1:])].add(
+                ClusterInfo(
+                    document=Document.objects.get(name=name),
+                    order_token=order_token,
+                )
+            )
+        for cluster_id in sorted(cluster_docs.keys()):
+            cluster, _ = Cluster.objects.get_or_create(number=cluster_id)
+            ordered_members = sorted(
+                cluster_docs[cluster_id], key=lambda o: int(o.order_token)
+            )
+            for order, member in enumerate(ordered_members, start=1):
+                ClusterMember.objects.create(
+                    cluster=cluster, doc=member.document, order=order
+                )
