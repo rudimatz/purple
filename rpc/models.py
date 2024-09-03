@@ -209,6 +209,7 @@ class ClusterMember(models.Model):
                 deferrable=models.Deferrable.DEFERRED,
             ),
         ]
+        ordering = ["order"]
 
 
 class Cluster(models.Model):
