@@ -207,7 +207,7 @@ class ClusterMember(models.Model):
                 name="clustermember_unique_doc",
                 violation_error_message="A document may not appear in more than one cluster",
                 deferrable=models.Deferrable.DEFERRED,
-            )
+            ),
         ]
 
 
