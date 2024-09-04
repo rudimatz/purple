@@ -16,6 +16,7 @@ from ...models import (
     Cluster,
     ClusterMember,
     RfcToBe,
+    RpcDocumentComment,
     RpcPerson,
     SourceFormatName,
     StdLevelName,
@@ -111,10 +112,17 @@ class Command(BaseCommand):
         self.import_clusters()
 
         # TODO
+
         # Get withdrawn docs
+
+        # Account for "not issued" index rows (did any have any work to capture?)
+
         # Handle other document types (?)
         #   >>> Counter(Index.objects.values_list('type',flat=True))
         #   Counter({'RFC': 9775, 'IEN': 208, 'BCP': 31, 'STD': 27})
+        # Maybe make a Subseries model.
+
+        # END TODO
 
     def build_rpc_people(self):
         for name in self.people_pks:
@@ -129,6 +137,18 @@ class Command(BaseCommand):
             )
 
     def get_published_rfcs(self):
+        RFCS_WITH_BROKEN_DRAFTNAMES = {
+            "RFC2605": "draft-ietf-madman-dsa-mib-1 : 2024-08-30 missing the version number, should be draft-ietf-madman-dsa-mib-1-10",
+            "RFC3018": "draft-bogdanov-umsp : 2024-08-30 potaroo.net knows about -00 and -01 versions, but datatracker does not",
+        }
+        RFCS_WITH_FAKE_DRAFTNAMES = {
+            "RFC5540": "draft-rfc-editor-40-anniversary-00 was developed by rfc-editor without submitting a draft",
+            "RFC6019": 'rfc4049bis : 2010-08-18   RFC 4049 was published in April 2005 as an Experimental RFC.  The IESG states that "The document is already referenced normatively by some existing Standard Track RFCs, documents approved for publication and draft.  For all practical purposes this document is a already a Standards Track document."  There are several changes to be made to the Proposed-Standard document, as indicated in the RFC Editor Notes of the 2010-08-16 IESG approval email.  The 2005 document does not have an IANA Considerations section."',
+            "RFC6342": "draft-ietf-v6ops-v6-in-mobile-networks-rfc6312bis : Draft string is fake; added to be a republication of RFC 6312.  RFC Editor made a mistake in publishing RFC 6312 with the number 6212 contained in it!  This doc corrects that error.",
+            "RFC6353": "draft-ietf-isms-dtls-tm-rfc5953bis-00 : I-D string is fake; created it to upgrade rfc5953 to Draft Standard after incorporating changes requested in RFC Editor notes.",
+            "RFC7159": "draft-ietf-json-rfc4627bis-rfc7159bis : 2014-03-03: This doc is a repub of RFC 7158 because we had the wrong year in the date field (it was marked 2013). This RFC corrects that error",
+            "RFC7396": "draft-ietf-rfc7386bis-00 : 2014-10-27: This doc is not a real I-D. This is a republication of RFC 7386 because of a formatting error caused by the RFC Editor (either manual insertion of tabs into artwork or insertion of tabs into artwork by the text editor being used). Paul corrected the formatting errors and send us the .xml file; it was not posted as an I-D because it was a formatting error only.",
+        }
         rfc_qs = Index.objects.filter(
             type="RFC", state_id__in=PUBLISHED_STATES
         ).exclude(status="NOT ISSUED")
@@ -136,53 +156,47 @@ class Command(BaseCommand):
             rfc_qs.exclude(draft__isnull=True)
             .exclude(draft="")
             .exclude(pub_date__month=4, pub_date__day=1)
-            .exclude(
-                doc_id__in=["RFC2605", "RFC3018", "RFC6019", "RFC6342", "RFC7159"]
-            )  # anomalous draft values
+            .exclude(doc_id__in=RFCS_WITH_FAKE_DRAFTNAMES.keys())
+            .exclude(doc_id__in=RFCS_WITH_BROKEN_DRAFTNAMES.keys())
             .values_list("draft", flat=True)
         )
         # All remaining draft names include version numbers - strip them
         update_documents([name.strip()[:-3] for name in names])
+        # Fixup what we can fixup
+        update_documents(
+            [
+                "draft-ietf-madman-dsa-mib-1",
+            ]
+        )
         original_streams = get_rfc_original_streams()
 
-        # First get published RFCs
-        problematic = []
-        nodraft = []
         for row in rfc_qs:
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
             found_doc = None
-            if not is_apr1:
-                if row.draft is None or row.draft == "":
-                    nodraft.append(row.doc_id)
-
-                    continue  # TODO solve the problem
-                # These are anomolies in the incoming data
-                # Some are missing drafts, some are republications of RFCs because of errors
-                # ('RFC3018', 'draft-bogdanov-umsp')
-                # ('RFC2605', 'draft-ietf-madman-dsa-mib-1')
-                # ('RFC6019', 'rfc4049bis')
-                # ('RFC6342', 'draft-ietf-v6ops-v6-in-mobile-networks-rfc6312bis')
-                # ('RFC7159', 'draft-ietf-json-rfc4627bis-rfc7159bis')
-                if row.doc_id in [
-                    "RFC2605",
-                    "RFC3018",
-                    "RFC6019",
-                    "RFC6342",
-                    "RFC7159",
-                ]:
-                    problematic.append(row.doc_id)
-                    continue  # TODO solve the problem
-                found_doc = Document.objects.filter(name=row.draft.strip()[:-3]).first()
+            if (
+                not row.doc_id in RFCS_WITH_FAKE_DRAFTNAMES.keys()
+                and row.doc_id != "RFC3018"  # semi-broken in datatracker
+                and not is_apr1
+                and row.draft is not None
+                and row.draft != ""
+            ):
+                name = row.draft.strip()
+                if name == "draft-ietf-madman-dsa-mib-1":
+                    name = (
+                        "draft-ietf-madman-dsa-mib-1-10"  # repair broken entry in index
+                    )
+                name = name[:-3]
+                found_doc = Document.objects.filter(name=name).first()
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
                     continue
             rfc_number = int(row.doc_id[3:])
-            RfcToBe.objects.get_or_create(
+            rfc_to_be = RfcToBe.objects.create(
                 disposition_id="published",
                 is_april_first_rfc=is_apr1,
-                draft=found_doc if not is_apr1 else None,
+                draft=found_doc,
                 rfc_number=rfc_number,
                 submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
@@ -202,15 +216,20 @@ class Command(BaseCommand):
                 external_deadline=None,  # TODO - capture known ones?
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
+            system, _ = DatatrackerPerson.objects.get_or_create(datatracker_id=1)
+            if row.doc_id in RFCS_WITH_FAKE_DRAFTNAMES:
+                rfc_to_be.rpcdocumentcomment_set.create(
+                    comment=RFCS_WITH_FAKE_DRAFTNAMES[row.doc_id], by=system
+                )
+            elif row.doc_id in RFCS_WITH_BROKEN_DRAFTNAMES:
+                rfc_to_be.rpcdocumentcomment_set.create(
+                    comment=RFCS_WITH_BROKEN_DRAFTNAMES[row.doc_id], by=system
+                )
+            elif found_doc is None and not is_apr1:
+                rfc_to_be.rpcdocumentcomment_set.create(
+                    comment="No draft available for this older RFC", by=system
+                )
             # TODO walk states and apply labels (with history)
-
-        print(
-            f"Skipped the following {len(nodraft)} items as they had no draft names populated (model breaks)"
-        )
-        print(sorted(nodraft))
-        print("")
-        print("Skipped the following known problematic items")
-        print(sorted(problematic))
 
     def get_in_process_docs(self):
         ip_qs = Index.objects.filter(type="RFC", state_id__in=IN_PROGRESS_STATES)
@@ -221,24 +240,13 @@ class Command(BaseCommand):
             .values_list("draft", flat=True)
         )
         update_documents([name.strip()[:-3] for name in names])
-        # First get published RFCs
-        problematic = []
-        nodraft = []
+
         for row in ip_qs:
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
             found_doc = None
-            if not is_apr1:
-                if row.draft is None or row.draft == "":
-                    nodraft.append(row.doc_id)
-
-                    continue  # TODO solve the problem
-                # These are no anomolies in this dataset
-
-                if row.doc_id in []:
-                    problematic.append(row.doc_id)
-                    continue  # TODO solve the problem
+            if not is_apr1 and row.draft is not None and row.draft != "":
                 found_doc = Document.objects.filter(name=row.draft.strip()[:-3]).first()
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
@@ -246,7 +254,7 @@ class Command(BaseCommand):
             RfcToBe.objects.get_or_create(
                 disposition_id="in_progress",
                 is_april_first_rfc=is_apr1,
-                draft=found_doc if not is_apr1 else None,
+                draft=found_doc,
                 rfc_number=int(row.doc_id[3:]) if row.doc_id != "RFC" else None,
                 submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
@@ -269,14 +277,6 @@ class Command(BaseCommand):
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
             # TODO walk states and apply labels (with history)
-
-        print(
-            f"Skipped the following {len(nodraft)} items as they had no draft names populated (model breaks)"
-        )
-        print(sorted(nodraft))
-        print("")
-        print("Skipped the following known problematic items")
-        print(sorted(problematic))
 
     def get_assignments(self):
         rpcperson_by_initials = dict()
