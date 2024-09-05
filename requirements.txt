@@ -6,4 +6,5 @@ factory-boy>=3.3
 mozilla-django-oidc>=4.0.0
 mysqlclient>=2.2.1
 psycopg2>=2.9.7
+tqdm>=4.66
 ./openapi/rpcapi_client
