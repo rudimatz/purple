@@ -97,6 +97,8 @@ class Command(BaseCommand):
             # There are 22 "Names" from the rfced Editors table not yet found in the datatracker
         }
 
+        self.index_id_of = dict()
+
         SourceFormatName.objects.get_or_create(
             slug="nroff",
             name="nroff",
@@ -216,6 +218,7 @@ class Command(BaseCommand):
                 external_deadline=None,  # TODO - capture known ones?
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
+            self.index_id_of[rfc_to_be] = row.pk
             system, _ = DatatrackerPerson.objects.get_or_create(datatracker_id=1)
             if row.doc_id in RFCS_WITH_FAKE_DRAFTNAMES:
                 rfc_to_be.rpcdocumentcomment_set.create(
@@ -251,7 +254,7 @@ class Command(BaseCommand):
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
                     continue
-            RfcToBe.objects.get_or_create(
+            rfc_to_be = RfcToBe.objects.create(
                 disposition_id="in_progress",
                 is_april_first_rfc=is_apr1,
                 draft=found_doc,
@@ -276,6 +279,7 @@ class Command(BaseCommand):
                 external_deadline=None,  # TODO - capture known ones?
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
+            self.index_id_of[rfc_to_be] = row.pk
             # TODO walk states and apply labels (with history)
 
     def get_assignments(self):
@@ -287,7 +291,8 @@ class Command(BaseCommand):
                 )
         # Focusing first on in-process docs - it's unclear what to do about past assignments
         for doc in RfcToBe.objects.filter(disposition_id="in_progress"):
-            assignments = EditorAssignments.objects.filter(doc_key=doc.pk).order_by(
+            index_id = self.index_id_of[doc]
+            assignments = EditorAssignments.objects.filter(doc_key=index_id).order_by(
                 "-role_key"
             )
             active_assignment = None
