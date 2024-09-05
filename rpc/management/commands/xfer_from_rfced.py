@@ -4,6 +4,8 @@
 from collections import defaultdict, namedtuple
 import rpcapi_client
 
+from tqdm import tqdm
+
 from django.core.management.base import BaseCommand
 
 from datatracker.models import DatatrackerPerson, Document
@@ -40,7 +42,7 @@ def get_rfc_original_streams(*, rpcapi: rpcapi_client.DefaultApi):
 @with_rpcapi
 def update_documents(docnames, *, rpcapi: rpcapi_client.DefaultApi):
     documents = rpcapi.get_drafts_by_names(docnames)
-    for name in docnames:
+    for name in tqdm(docnames, desc="update_documents"):
         if name not in documents:
             print(f"skipping create_or_update of {name}")
             continue
@@ -172,7 +174,7 @@ class Command(BaseCommand):
         )
         original_streams = get_rfc_original_streams()
 
-        for row in rfc_qs:
+        for row in tqdm(rfc_qs, desc="get_pubished_rfcs"):
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
@@ -244,7 +246,7 @@ class Command(BaseCommand):
         )
         update_documents([name.strip()[:-3] for name in names])
 
-        for row in ip_qs:
+        for row in tqdm(ip_qs, desc="get_in_process_docs"):
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
@@ -290,7 +292,9 @@ class Command(BaseCommand):
                     datatracker_person__datatracker_id=self.people_pks[row.name]
                 )
         # Focusing first on in-process docs - it's unclear what to do about past assignments
-        for doc in RfcToBe.objects.filter(disposition_id="in_progress"):
+        for doc in tqdm(
+            RfcToBe.objects.filter(disposition_id="in_progress"), desc="get_assignments"
+        ):
             index_id = self.index_id_of[doc]
             assignments = EditorAssignments.objects.filter(doc_key=index_id).order_by(
                 "-role_key"
@@ -376,8 +380,9 @@ class Command(BaseCommand):
         update_documents(list(draft_names))
         ClusterInfo = namedtuple("ClusterInfo", ["document", "order_token"])
         cluster_docs = defaultdict(set)
-        for offset, cluster_member in enumerate(
-            Clusters.objects.exclude(cluster_id=""), start=50000
+        for offset, cluster_member in tqdm(
+            enumerate(Clusters.objects.exclude(cluster_id=""), start=50000),
+            desc="build cluster order",
         ):
             index_row_qs = Index.objects.filter(
                 type="RFC",
@@ -407,7 +412,7 @@ class Command(BaseCommand):
                     order_token=order_token,
                 )
             )
-        for cluster_id in sorted(cluster_docs.keys()):
+        for cluster_id in tqdm(sorted(cluster_docs.keys()), desc="import clusters"):
             cluster, _ = Cluster.objects.get_or_create(number=cluster_id)
             ordered_members = sorted(
                 cluster_docs[cluster_id], key=lambda o: int(o.order_token)
