@@ -310,8 +310,8 @@ class Command(BaseCommand):
                         person=rpcperson_by_initials[assignment.initials],
                         role_id={
                             1: "first_editor",
-                            2: "second_editor",
-                            3: "final_review_editor",
+                            2: "enqueuer",
+                            3: "second_editor",
                             4: "publisher",
                         }[assignment.role_key],
                         state=(
