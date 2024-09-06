@@ -134,6 +134,8 @@ type Props = {
 
 const props = defineProps<Props>()
 
+const currentTime = useCurrentTime()
+
 const _assignEditor = inject(assignEditorKey)
 if (!_assignEditor) {
   throw Error('Required assignEditor injection')
@@ -163,7 +165,6 @@ function toggleEditor (editorIds: number[]) {
 }
 
 const cookedDocument = computed(() => {
-  const now = DateTime.now()
   const teamPagesPerHour = 1.0
   const assignmentsPersons = props.document?.assignments?.map(
     assignment => props?.editors?.find(editor => editor.id === assignment.person?.id)
@@ -171,7 +172,7 @@ const cookedDocument = computed(() => {
 
   return ({
     ...props.document,
-    external_deadline: props.document.external_deadline && DateTime.fromISO(props.document.external_deadline),
+    external_deadline: props.document.externalDeadline && DateTime.fromJSDate(props.document.externalDeadline),
     assignments: props.document.assignments,
     assignmentsPersons,
     assignmentsPersonIds: assignmentsPersons?.map(editor => editor?.id),
@@ -179,7 +180,8 @@ const cookedDocument = computed(() => {
       ?.map(editor => ({
         ...editor,
         assignedDocuments: props?.editorAssignedDocuments?.[editor.id],
-        completeBy: now.plus({ days: 7 * props.document.pages / teamPagesPerHour / editor.hours_per_week })
+        // @ts-expect-error - drf-spectacular incorrectly marks hoursPerWeek as possibly undefined in the API schema
+        completeBy: currentTime.value.plus({ days: 7 * props.document.pages / teamPagesPerHour / editor.hoursPerWeek })
       }))
       .sort((a, b) => a.completeBy.toMillis() - b.completeBy.toMillis())
   })
