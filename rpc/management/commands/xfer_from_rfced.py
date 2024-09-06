@@ -18,7 +18,6 @@ from ...models import (
     Cluster,
     ClusterMember,
     RfcToBe,
-    RpcDocumentComment,
     RpcPerson,
     SourceFormatName,
     StdLevelName,
@@ -73,6 +72,7 @@ class Command(BaseCommand):
     help = "Transfer data from a dump of the current RPC production database"
 
     def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.people_pks = {
             # Direct name matches in datatracker
             "Aaron Falk": 21226,
@@ -82,7 +82,6 @@ class Command(BaseCommand):
             "Sandy Ginoza": 104401,
             "Alice Russo": 113811,
             "Marshika Szabo": 127045,
-            "Reuben Esparza": 127195,
             "Karen Moore": 127686,
             "Megan Ferguson": 128027,
             "Lynne Bartholomew": 128311,
