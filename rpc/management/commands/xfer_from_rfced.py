@@ -379,9 +379,9 @@ class Command(BaseCommand):
         update_documents(list(draft_names))
         ClusterInfo = namedtuple("ClusterInfo", ["document", "order_token"])
         cluster_docs = defaultdict(set)
-        for offset, cluster_member in tqdm(
-            enumerate(Clusters.objects.exclude(cluster_id=""), start=50000),
-            desc="build cluster order",
+        for offset, cluster_member in enumerate(
+            tqdm(Clusters.objects.exclude(cluster_id=""), desc="build cluster order"),
+            start=50000,
         ):
             index_row_qs = Index.objects.filter(
                 type="RFC",
