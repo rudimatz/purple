@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 
 from collections import defaultdict, namedtuple
+import datetime
+from itertools import cycle, pairwise
 import rpcapi_client
 
 from tqdm import tqdm
@@ -11,22 +13,37 @@ from django.core.management.base import BaseCommand
 from datatracker.models import DatatrackerPerson, Document
 from datatracker.rpcapi import with_rpcapi
 
-from rfced.models import Clusters, EditorAssignments, Editors, Index, WorkingGroup
+from rfced.models import (
+    Clusters,
+    EditorAssignments,
+    Editors,
+    Index,
+    StateHistory,
+    States,
+    WorkingGroup,
+)
 
 from ...models import (
     Assignment,
     Cluster,
     ClusterMember,
+    HistoricalRfcToBe,  # type: ignore (managed by django-simple-history)
+    Label,
     RfcToBe,
     RpcPerson,
     SourceFormatName,
     StdLevelName,
     StreamName,
+    TAILWIND_COLORS,
 )
 
 # Arcana
 IN_PROGRESS_STATES = [1, 2, 4, 10, 12, 13, 15, 17, 18, 22, 23, 20]
 PUBLISHED_STATES = [14]
+
+# Special label names
+IANA_FLAG_LABEL_NAME: str = "*A"
+REF_FLAG_LABEL_NAME: str = "*R"
 
 
 @with_rpcapi
@@ -100,6 +117,8 @@ class Command(BaseCommand):
 
         self.index_id_of = dict()
 
+        self.label_name_to_id: dict[str, int] = dict()
+
         SourceFormatName.objects.get_or_create(
             slug="nroff",
             name="nroff",
@@ -108,6 +127,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        self.import_labels()
         self.build_rpc_people()
         self.get_published_rfcs()
         self.get_in_process_docs()
@@ -126,6 +146,31 @@ class Command(BaseCommand):
         # Maybe make a Subseries model.
 
         # END TODO
+
+    def import_labels(self):
+        # Build id-name pairs from states
+        label_id_name_pairs: list[tuple[int, str]] = [
+            (row[0], row[1])
+            for row in States.objects.all().values_list("state_id", "state_name")
+        ]
+
+        # Import missing state (state_id: 0) as unknown
+        assert 0 not in [i for (i, _) in label_id_name_pairs]
+        label_id_name_pairs.append((0, "unknown"))  # state 0
+
+        # Import *A and *R flags as separate labels
+        max_id: int = max(i for (i, _) in label_id_name_pairs)
+        flags: list[str] = [IANA_FLAG_LABEL_NAME, REF_FLAG_LABEL_NAME]
+        for offset, flag in enumerate(flags, start=1):
+            label_id_name_pairs.append((max_id + offset, flag))
+
+        # Import labels
+        for (i, n), c in tqdm(
+            zip(label_id_name_pairs, cycle(TAILWIND_COLORS)),
+            desc="import_labels",
+        ):
+            Label.objects.get_or_create(id=i, slug=n, color=c)
+            self.label_name_to_id[n] = i
 
     def build_rpc_people(self):
         for name in self.people_pks:
@@ -173,7 +218,11 @@ class Command(BaseCommand):
         )
         original_streams = get_rfc_original_streams()
 
-        for row in tqdm(rfc_qs, desc="get_pubished_rfcs"):
+        # Cache labels in memory for faster lookups
+        labels = Label.objects.all()
+        labels_cached: dict[int, Label] = {label.id: label for label in labels}
+
+        for row in tqdm(rfc_qs, desc="get_published_rfcs"):
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
@@ -233,7 +282,74 @@ class Command(BaseCommand):
                 rfc_to_be.rpcdocumentcomment_set.create(
                     comment="No draft available for this older RFC", by=system
                 )
-            # TODO walk states and apply labels (with history)
+
+            # walk states and apply labels (with history)
+            state_history = StateHistory.objects.filter(
+                internal_dockey=row.internal_key
+            ).order_by(
+                "in_date",  # type: date (not datetime)
+                "id",  # rely on autoincrement to sort multiple states from same day
+            )
+
+            label_history: list[set[int]] = []
+            label_dates: list[datetime.date] = []
+            for sh in state_history:
+                label_ids: list[int] = []
+                label_ids.append(sh.state_id)
+                if sh.iana_flag:
+                    label_ids.append(self.label_name_to_id[IANA_FLAG_LABEL_NAME])
+                if sh.ref_flag:
+                    label_ids.append(self.label_name_to_id[REF_FLAG_LABEL_NAME])
+                label_history.append(set(label_ids))
+                label_dates.append(sh.in_date)
+
+            assert len(label_history) == len(label_dates)
+            if not label_history:
+                continue
+
+            def _update_latest_history_date(
+                history_date: datetime.date,
+            ) -> HistoricalRfcToBe:
+                h: HistoricalRfcToBe = rfc_to_be.history.latest()
+                h.history_date = datetime.datetime(
+                    history_date.year,
+                    history_date.month,
+                    history_date.day,
+                    tzinfo=datetime.timezone.utc,
+                )
+                return h
+
+            history: list[HistoricalRfcToBe] = []
+
+            # override date of doc's first change (+)
+            history.append(_update_latest_history_date(min(label_dates)))
+
+            # first set of labels (always additions since doc has no labels initially)
+            for label_id in sorted(label_history[0]):
+                rfc_to_be.labels.add(labels_cached[label_id])
+                history.append(_update_latest_history_date(label_dates[0]))
+            # subsequent sets of labels (subtractions and/or additions)
+            for (old, _), (new, date) in pairwise(zip(label_history, label_dates)):
+                # if no intersection, clear existing labels and then add all new labels at once
+                intersection: set[int] = old & new
+                if not intersection:
+                    rfc_to_be.labels.set([])
+                    history.append(_update_latest_history_date(date))
+                    rfc_to_be.labels.set([labels_cached[id_] for id_ in sorted(new)])
+                    history.append(_update_latest_history_date(date))
+                    continue
+                # otherwise, add and remove labels one by one
+                removed: set[int] = old - new
+                added: set[int] = new - old
+                for label_id in sorted(removed):
+                    rfc_to_be.labels.remove(labels_cached[label_id])
+                    history.append(_update_latest_history_date(date))
+                for label_id in sorted(added):
+                    rfc_to_be.labels.add(labels_cached[label_id])
+                    history.append(_update_latest_history_date(date))
+
+            # bulk update on HistoricalRfcToBe.history_date
+            HistoricalRfcToBe.objects.bulk_update(history, ["history_date"])
 
     def get_in_process_docs(self):
         ip_qs = Index.objects.filter(type="RFC", state_id__in=IN_PROGRESS_STATES)
