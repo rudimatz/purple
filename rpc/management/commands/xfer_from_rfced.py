@@ -24,11 +24,13 @@ from rfced.models import (
 )
 
 from ...models import (
+    AdditionalEmail,
     Assignment,
     Cluster,
     ClusterMember,
     HistoricalRfcToBe,  # type: ignore (managed by django-simple-history)
     Label,
+    RfcAuthor,
     RfcToBe,
     RpcPerson,
     SourceFormatName,
@@ -36,6 +38,8 @@ from ...models import (
     StreamName,
     TAILWIND_COLORS,
 )
+
+from ...utils_xfer import TransformHelper, MatchHelper
 
 # Arcana
 IN_PROGRESS_STATES = [1, 2, 4, 10, 12, 13, 15, 17, 18, 22, 23, 20]
@@ -53,6 +57,19 @@ def get_rfc_original_streams(*, rpcapi: rpcapi_client.DefaultApi):
     for item in original_stream_list:
         original_streams[item.rfc_number] = item.stream
     return original_streams
+
+
+@with_rpcapi
+def persons_by_email(emails, *, rpcapi: rpcapi_client.DefaultApi):
+    result = dict()
+    for item in rpcapi.persons_by_email(emails):
+        result[item.email] = item
+    return result
+
+
+@with_rpcapi
+def rfc_authors(rfc_numbers, *, rpcapi: rpcapi_client.DefaultApi):
+    return rpcapi.get_rfc_authors(rfc_numbers)
 
 
 @with_rpcapi
@@ -82,7 +99,7 @@ def update_documents(docnames, *, rpcapi: rpcapi_client.DefaultApi):
             doc.pages = docinfo["pages"]
             doc.save()
 
-        # TODO: not doing anything with authors...
+    return documents
 
 
 class Command(BaseCommand):
@@ -117,6 +134,8 @@ class Command(BaseCommand):
 
         self.index_id_of = dict()
 
+        self.draftinfo = dict()
+
         self.label_name_to_id: dict[str, int] = dict()
 
         SourceFormatName.objects.get_or_create(
@@ -133,6 +152,7 @@ class Command(BaseCommand):
         self.get_in_process_docs()
         self.get_assignments()
         self.import_clusters()
+        self.get_authors_and_approvers()
 
         # TODO
 
@@ -146,6 +166,11 @@ class Command(BaseCommand):
         # Maybe make a Subseries model.
 
         # END TODO
+
+    def update_draftinfo(self, docnames):
+        updoc = update_documents(docnames)
+        if updoc is not None:
+            self.draftinfo.update(updoc)
 
     def import_labels(self):
         # Build id-name pairs from states
@@ -165,10 +190,7 @@ class Command(BaseCommand):
             label_id_name_pairs.append((max_id + offset, flag))
 
         # Import labels
-        for (i, n), c in tqdm(
-            zip(label_id_name_pairs, cycle(TAILWIND_COLORS)),
-            desc="import_labels",
-        ):
+        for (i, n), c in zip(tqdm(label_id_name_pairs, desc="import_labels"), cycle(TAILWIND_COLORS)):
             Label.objects.get_or_create(id=i, slug=n, color=c)
             self.label_name_to_id[n] = i
 
@@ -209,9 +231,9 @@ class Command(BaseCommand):
             .values_list("draft", flat=True)
         )
         # All remaining draft names include version numbers - strip them
-        update_documents([name.strip()[:-3] for name in names])
+        self.update_draftinfo([name.strip()[:-3] for name in names])
         # Fixup what we can fixup
-        update_documents(
+        self.update_draftinfo(
             [
                 "draft-ietf-madman-dsa-mib-1",
             ]
@@ -305,7 +327,7 @@ class Command(BaseCommand):
 
             assert len(label_history) == len(label_dates)
             if not label_history:
-                continue
+                continue # TODO: refactor this so other unrelated code can follow in the loop.
 
             def _update_latest_history_date(
                 history_date: datetime.date,
@@ -322,6 +344,9 @@ class Command(BaseCommand):
             history: list[HistoricalRfcToBe] = []
 
             # override date of doc's first change (+)
+            # TODO: this isn't right - the concept of history needs to be refactored
+            # to be accounted at the actual RfcToBe creation and any other changes need
+            # to be reflected in that history.
             history.append(_update_latest_history_date(min(label_dates)))
 
             # first set of labels (always additions since doc has no labels initially)
@@ -359,7 +384,7 @@ class Command(BaseCommand):
             .exclude(pub_date__month=4, pub_date__day=1)
             .values_list("draft", flat=True)
         )
-        update_documents([name.strip()[:-3] for name in names])
+        self.update_draftinfo([name.strip()[:-3] for name in names])
 
         for row in tqdm(ip_qs, desc="get_in_process_docs"):
             is_apr1 = (
@@ -410,6 +435,9 @@ class Command(BaseCommand):
         for doc in tqdm(
             RfcToBe.objects.filter(disposition_id="in_progress"), desc="get_assignments"
         ):
+            if doc not in self.index_id_of:
+                print(f"Skipping assignments for {doc}")
+                continue
             index_id = self.index_id_of[doc]
             assignments = EditorAssignments.objects.filter(doc_key=index_id).order_by(
                 "-role_key"
@@ -492,7 +520,7 @@ class Command(BaseCommand):
             draft_names.discard(bad_name)
         for good_name in garbage_in.values():
             draft_names.add(good_name)
-        update_documents(list(draft_names))
+        self.update_draftinfo(list(draft_names))
         ClusterInfo = namedtuple("ClusterInfo", ["document", "order_token"])
         cluster_docs = defaultdict(set)
         for offset, cluster_member in enumerate(
@@ -536,3 +564,164 @@ class Command(BaseCommand):
                 ClusterMember.objects.create(
                     cluster=cluster, doc=member.document, order=order
                 )
+
+    def parse_authors(self, authors):
+        """Heuristically split the rfced.models.Index.authors field
+
+        Returns a list of dicts, one for each name, containing:
+            titlepage_name : name that the current search and metadata
+                             pages show for each author (maybe normalized
+                             for commas)
+            lastname : last name without any suffix
+            initials : full set of initials
+            is_editor : whether the name was adorned with ", Ed."
+        """
+        results = []
+        author = dict()
+        elements = [e.strip() for e in authors.split(",")]
+        elements.reverse()
+        while len(elements) > 0:
+            token = elements.pop(0)
+            if token == "Ed.":
+                author["is_editor"] = True
+                token = elements.pop(0)
+            else:
+                author["is_editor"] = False
+            if token in ["II", "III", "et al."]:
+                author["comma_separated_suffix"] = token
+                token = elements.pop(0)
+            else:
+                author["comma_separated_suffix"] = ""
+            last_period_space_index = token.rfind(". ")
+            if last_period_space_index == -1:
+                author["lastname"] = token
+                author["initials"] = ""
+            else:
+                author["lastname"] = token[last_period_space_index + 2 :]
+                author["initials"] = token[: last_period_space_index + 1]
+            titlepage_name = ""
+            if len(author["initials"]) > 0:
+                titlepage_name = f"{author["initials"]} "
+            titlepage_name = titlepage_name + author["lastname"]
+            if len(author["comma_separated_suffix"]) > 0:
+                titlepage_name = (
+                    titlepage_name + f", {author["comma_separated_suffix"]}"
+                )
+            if author["is_editor"]:
+                titlepage_name = titlepage_name + f", Ed."
+            author["titlepage_name"] = titlepage_name
+            results.append(author)
+            author = dict()
+        return results
+
+    def get_authors_and_approvers(self):
+        transform_helper = TransformHelper()
+        match_helper = MatchHelper()
+        email_lists = (
+            Index.objects.filter(pk__in=self.index_id_of.values())
+            .exclude(email__isnull=True)
+            .values_list("email", flat=True)
+        )
+        emails = [e.strip().lower() for line in email_lists for e in line.split(",")]
+        email_to_person = persons_by_email(emails)
+
+        dt_rfc_authors = dict(
+            [
+                (i.rfc_number, i.authors)
+                for i in rfc_authors(
+                    list(
+                        RfcToBe.objects.filter(disposition_id="published").values_list(
+                            "rfc_number", flat=True
+                        )
+                    )
+                )
+            ]
+        )
+
+        fails = 0
+        for rfc in tqdm(
+            RfcToBe.objects.filter(disposition_id="published"),
+            desc="building authors and approvers",
+        ):
+            index = Index.objects.get(pk=self.index_id_of[rfc])
+            rfced_authors = self.parse_authors(index.authors)
+            index_email = index.email
+            if index_email is None:
+                index_email = ""
+            rfced_emails = set([a.strip().lower() for a in index_email.split(",")])
+            # Get the authors the datatracker knows about
+            # create an RfcAuthor object for each of those, consuming the matching
+            #   name out of index.authors and emails from index.email
+            for dt_author in dt_rfc_authors[rfc.rfc_number]:
+                match = False
+                for rfced_author in rfced_authors:
+                    if match_helper.manually_confirmed_match(
+                        rfc.rfc_number,
+                        rfced_author["titlepage_name"],
+                        dt_author.person_pk,
+                    ):
+                        match = True
+                        break
+                    elif (
+                        dt_author.last_name.lower()
+                        == transform_helper.transformed_lastname(
+                            rfced_author["lastname"]
+                        ).lower()
+                        and (
+                            dt_author.initials == ""
+                            or dt_author.initials[0].lower()
+                            == transform_helper.transformed_first_initial(
+                                rfced_author
+                            ).lower()
+                        )
+                    ):
+                        match = True
+                        break
+                if not match:
+                    print("-----------------------")
+                    print(f"RFC {rfc.rfc_number}")
+                    print(f"dt_author: {dt_author}")
+                    for rfced_author in rfced_authors:
+                        print(f"rfced_author: {rfced_author}")
+                    fails += 1
+                else:
+                    rfced_authors.remove(rfced_author)
+                    rfced_emails = rfced_emails - set(dt_author.email_addresses)
+                    datatracker_person, _ = DatatrackerPerson.objects.get_or_create(
+                        datatracker_id=dt_author.person_pk
+                    )
+                    RfcAuthor.objects.create(
+                        rfc_to_be=rfc,
+                        titlepage_name=rfced_author["titlepage_name"],
+                        is_editor=rfced_author["is_editor"],
+                        datatracker_person=datatracker_person,
+                        # TODO look for a matching auth_48 approval
+                    )
+
+            # create an RfcAuthor object with no DatatrackerPerson for any remaining
+            #   names out of index.authors
+            for rfced_author in rfced_authors:
+                if len(rfced_author["titlepage_name"]) > 128:
+                    print(
+                        f"***** TITLEPAGENAME TOO LONG {rfced_author['titlepage_name']}"
+                    )
+                RfcAuthor.objects.create(
+                    rfc_to_be=rfc,
+                    titlepage_name=rfced_author["titlepage_name"][
+                        :128
+                    ],  # TODO remove truncation
+                    is_editor=rfced_author["is_editor"],
+                    datatracker_person=None,
+                    # TODO look for a matching auth_48 approval
+                )
+
+            # create an AdditionalEmail object for each email remaining in index.email
+            for address in rfced_emails:
+                AdditionalEmail.objects.create(email=address, rfc_to_be=rfc)
+
+        print(f"Total failures: {fails}")
+
+        # TODO - deal with the non-author approvers
+
+        # TODO: deal with in_progress
+        # TODO: deal with not in [published, in_progress]
