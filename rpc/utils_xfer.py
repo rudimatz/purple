@@ -36,7 +36,7 @@ class TransformHelper:
             return lastname
 
 
-class MatchHelper:
+class RfcMatchHelper:
 
     def __init__(self):
         self.MATCHES = self.matches()
@@ -1085,4 +1085,36 @@ class MatchHelper:
             ("Y. Niibe", 128037): [9580],
             ("Z. Liu", 114071): [3095, 3320, 3321, 3408, 5049, 7152, 7309, 8099],
             ("É. Vyncke", 105099): [8801, 9099, 9511],
+        }
+
+
+class DraftMatchHelper:
+
+    def __init__(self):
+        self.MATCHES = self.matches()
+
+    def manually_confirmed_match(self, draft_name, titlepage_name, person_pk):
+        if (titlepage_name, person_pk) not in self.MATCHES:
+            return False
+        return draft_name in self.MATCHES[(titlepage_name, person_pk)]
+
+    def matches(self):
+        """Returns a curated set of rfced name to datatracker person matches
+
+        Maps (frontpage_name, datatracker_person_pk) to a list of
+        draft names that use that fronpage_name and should be
+        associated with that dataracker_person_pk
+        """
+        return {
+            ("J. Park", 103781): [
+                "draft-ietf-i2nsf-nsf-facing-interface-dm",
+                "draft-ietf-i2nsf-registration-interface-dm",
+            ],
+            ("M. Beurden", 128988): ["draft-ietf-cellar-flac"],
+            ("O. Dios", 110932): ["draft-ietf-ccamp-l1csm-yang"],
+            ("J. Preuß Mattsson", 109330): ["draft-ietf-emu-aka-pfs"],
+            ("M. Kuehlewind", 112330): ["draft-ietf-taps-interface"],
+            ("C. Martinez", 113581): ["draft-ietf-sidrops-signed-tal"],
+            ("N. Kumar", 113645): ["draft-ietf-mpls-spring-inter-domain-oam"],
+            ("C. Ramachandran", 113470): ["draft-ietf-mpls-ri-rsvp-frr"],
         }

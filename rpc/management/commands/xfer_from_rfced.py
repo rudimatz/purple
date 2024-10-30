@@ -39,7 +39,7 @@ from ...models import (
     TAILWIND_COLORS,
 )
 
-from ...utils_xfer import TransformHelper, MatchHelper
+from ...utils_xfer import TransformHelper, RfcMatchHelper, DraftMatchHelper
 
 # Arcana
 IN_PROGRESS_STATES = [1, 2, 4, 10, 12, 13, 15, 17, 18, 22, 23, 20]
@@ -70,6 +70,11 @@ def persons_by_email(emails, *, rpcapi: rpcapi_client.DefaultApi):
 @with_rpcapi
 def rfc_authors(rfc_numbers, *, rpcapi: rpcapi_client.DefaultApi):
     return rpcapi.get_rfc_authors(rfc_numbers)
+
+
+@with_rpcapi
+def draft_authors(draft_names, *, rpcapi: rpcapi_client.DefaultApi):
+    return rpcapi.get_draft_authors(draft_names)
 
 
 @with_rpcapi
@@ -190,7 +195,9 @@ class Command(BaseCommand):
             label_id_name_pairs.append((max_id + offset, flag))
 
         # Import labels
-        for (i, n), c in zip(tqdm(label_id_name_pairs, desc="import_labels"), cycle(TAILWIND_COLORS)):
+        for (i, n), c in zip(
+            tqdm(label_id_name_pairs, desc="import_labels"), cycle(TAILWIND_COLORS)
+        ):
             Label.objects.get_or_create(id=i, slug=n, color=c)
             self.label_name_to_id[n] = i
 
@@ -327,7 +334,7 @@ class Command(BaseCommand):
 
             assert len(label_history) == len(label_dates)
             if not label_history:
-                continue # TODO: refactor this so other unrelated code can follow in the loop.
+                continue  # TODO: refactor this so other unrelated code can follow in the loop.
 
             def _update_latest_history_date(
                 history_date: datetime.date,
@@ -386,6 +393,10 @@ class Command(BaseCommand):
         )
         self.update_draftinfo([name.strip()[:-3] for name in names])
 
+        # Cache labels in memory for faster lookups
+        labels = Label.objects.all()
+        labels_cached: dict[int, Label] = {label.id: label for label in labels}
+
         for row in tqdm(ip_qs, desc="get_in_process_docs"):
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
@@ -422,7 +433,77 @@ class Command(BaseCommand):
                 internal_goal=None,  # TODO - does the rfced db capture this?
             )
             self.index_id_of[rfc_to_be] = row.pk
-            # TODO walk states and apply labels (with history)
+
+            # walk states and apply labels (with history)
+            state_history = StateHistory.objects.filter(
+                internal_dockey=row.internal_key
+            ).order_by(
+                "in_date",  # type: date (not datetime)
+                "id",  # rely on autoincrement to sort multiple states from same day
+            )
+
+            label_history: list[set[int]] = []
+            label_dates: list[datetime.date] = []
+            for sh in state_history:
+                label_ids: list[int] = []
+                label_ids.append(sh.state_id)
+                if sh.iana_flag:
+                    label_ids.append(self.label_name_to_id[IANA_FLAG_LABEL_NAME])
+                if sh.ref_flag:
+                    label_ids.append(self.label_name_to_id[REF_FLAG_LABEL_NAME])
+                label_history.append(set(label_ids))
+                label_dates.append(sh.in_date)
+
+            assert len(label_history) == len(label_dates)
+            if not label_history:
+                continue  # TODO: refactor this so other unrelated code can follow in the loop.
+
+            def _update_latest_history_date(
+                history_date: datetime.date,
+            ) -> HistoricalRfcToBe:
+                h: HistoricalRfcToBe = rfc_to_be.history.latest()
+                h.history_date = datetime.datetime(
+                    history_date.year,
+                    history_date.month,
+                    history_date.day,
+                    tzinfo=datetime.timezone.utc,
+                )
+                return h
+
+            history: list[HistoricalRfcToBe] = []
+
+            # override date of doc's first change (+)
+            # TODO: this isn't right - the concept of history needs to be refactored
+            # to be accounted at the actual RfcToBe creation and any other changes need
+            # to be reflected in that history.
+            history.append(_update_latest_history_date(min(label_dates)))
+
+            # first set of labels (always additions since doc has no labels initially)
+            for label_id in sorted(label_history[0]):
+                rfc_to_be.labels.add(labels_cached[label_id])
+                history.append(_update_latest_history_date(label_dates[0]))
+            # subsequent sets of labels (subtractions and/or additions)
+            for (old, _), (new, date) in pairwise(zip(label_history, label_dates)):
+                # if no intersection, clear existing labels and then add all new labels at once
+                intersection: set[int] = old & new
+                if not intersection:
+                    rfc_to_be.labels.set([])
+                    history.append(_update_latest_history_date(date))
+                    rfc_to_be.labels.set([labels_cached[id_] for id_ in sorted(new)])
+                    history.append(_update_latest_history_date(date))
+                    continue
+                # otherwise, add and remove labels one by one
+                removed: set[int] = old - new
+                added: set[int] = new - old
+                for label_id in sorted(removed):
+                    rfc_to_be.labels.remove(labels_cached[label_id])
+                    history.append(_update_latest_history_date(date))
+                for label_id in sorted(added):
+                    rfc_to_be.labels.add(labels_cached[label_id])
+                    history.append(_update_latest_history_date(date))
+
+            # bulk update on HistoricalRfcToBe.history_date
+            HistoricalRfcToBe.objects.bulk_update(history, ["history_date"])
 
     def get_assignments(self):
         rpcperson_by_initials = dict()
@@ -616,7 +697,8 @@ class Command(BaseCommand):
 
     def get_authors_and_approvers(self):
         transform_helper = TransformHelper()
-        match_helper = MatchHelper()
+        rfc_match_helper = RfcMatchHelper()
+        draft_match_helper = DraftMatchHelper()
         email_lists = (
             Index.objects.filter(pk__in=self.index_id_of.values())
             .exclude(email__isnull=True)
@@ -638,9 +720,22 @@ class Command(BaseCommand):
             ]
         )
 
+        dt_draft_authors = dict(
+            [
+                (i.draft_name, i.authors)
+                for i in draft_authors(
+                    list(
+                        RfcToBe.objects.filter(
+                            disposition_id="in_progress"
+                        ).values_list("draft__name", flat=True)
+                    )
+                )
+            ]
+        )
+
         fails = 0
         for rfc in tqdm(
-            RfcToBe.objects.filter(disposition_id="published"),
+            RfcToBe.objects.filter(disposition_id__in=["published", "in_progress"]),
             desc="building authors and approvers",
         ):
             index = Index.objects.get(pk=self.index_id_of[rfc])
@@ -652,13 +747,31 @@ class Command(BaseCommand):
             # Get the authors the datatracker knows about
             # create an RfcAuthor object for each of those, consuming the matching
             #   name out of index.authors and emails from index.email
-            for dt_author in dt_rfc_authors[rfc.rfc_number]:
+            dt_authors = (
+                dt_rfc_authors[rfc.rfc_number]
+                if rfc.disposition_id == "published"
+                else dt_draft_authors[rfc.draft.name]
+            )
+            for dt_author in dt_authors:
                 match = False
                 for rfced_author in rfced_authors:
-                    if match_helper.manually_confirmed_match(
-                        rfc.rfc_number,
-                        rfced_author["titlepage_name"],
-                        dt_author.person_pk,
+                    if (
+                        rfc.disposition_id == "published"
+                        and rfc_match_helper.manually_confirmed_match(
+                            rfc.rfc_number,
+                            rfced_author["titlepage_name"],
+                            dt_author.person_pk,
+                        )
+                    ):
+                        match = True
+                        break
+                    elif (
+                        rfc.disposition_id == "in_progress"
+                        and draft_match_helper.manually_confirmed_match(
+                            rfc.draft.name,
+                            rfced_author["titlepage_name"],
+                            dt_author.person_pk,
+                        )
                     ):
                         match = True
                         break
@@ -679,7 +792,9 @@ class Command(BaseCommand):
                         break
                 if not match:
                     print("-----------------------")
-                    print(f"RFC {rfc.rfc_number}")
+                    print(
+                        f"RFC {rfc.rfc_number} / {rfc.draft.name if rfc.draft else 'no draft'}"
+                    )
                     print(f"dt_author: {dt_author}")
                     for rfced_author in rfced_authors:
                         print(f"rfced_author: {rfced_author}")
