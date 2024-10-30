@@ -1,0 +1,136 @@
+name: Build DB Image
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Make Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 1
+        fetch-tags: false
+
+    - name: Launch build VM
+      id: azlaunch
+      timeout-minutes: 10
+      run: |
+        echo "Authenticating to Azure..."
+        az login --service-principal -u ${{ secrets.AZ_BUILD_APP_ID }} -p ${{ secrets.AZ_BUILD_PWD }} --tenant ${{ secrets.AZ_BUILD_TENANT_ID }}
+        
+        echo "Creating VM..."
+        vminfo=$(az vm create \
+          --resource-group ghaPurple \
+          --name tmpGhaBuildVM-${{ github.run_number }} \
+          --image Ubuntu2204 \
+          --admin-username azureuser \
+          --generate-ssh-keys \
+          --priority Spot \
+          --size Standard_D8ads_v5 \
+          --max-price -1 \
+          --ephemeral-os-disk \
+          --os-disk-size-gb 100 \
+          --eviction-policy Delete \
+          --nic-delete-option Delete \
+          --os-disk-delete-option Delete \
+          --output tsv \
+          --query "publicIpAddress")
+        echo "ipaddr=$vminfo" >> "$GITHUB_OUTPUT"
+        echo "VM Public IP: $vminfo"
+        cat ~/.ssh/id_rsa > ${{ github.workspace }}/prvkey.key
+        
+        echo "Fetching SSH host public keys..."
+        until ssh-keyscan -t rsa $vminfo 2> /dev/null
+        do
+          echo "Will try again in 5 seconds..."
+          sleep 5
+        done
+        ssh-keyscan -t rsa $vminfo >> ~/.ssh/known_hosts
+
+    - name: Remote SSH into Build VM
+      uses: appleboy/ssh-action@25ce8cbbcb08177468c7ff7ec5cbfa236f9341e1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GITHUB_ACTOR: ${{ github.actor }}
+        GITHUB_SHA: ${{ github.sha }}
+        GITHUB_REF_NAME: ${{ github.ref_name }}
+        GITHUB_RUN_ID: ${{ github.run_id }}
+        DEBIAN_FRONTEND: noninteractive
+      with:
+        host: ${{ steps.azlaunch.outputs.ipaddr }}
+        port: 22
+        username: azureuser
+        command_timeout: 60m
+        key_path: ${{ github.workspace }}/prvkey.key
+        envs: GITHUB_TOKEN,GITHUB_ACTOR,GITHUB_SHA,GITHUB_REF_NAME,GITHUB_RUN_ID,DEBIAN_FRONTEND
+        script_stop: true
+        script: |
+          export DEBIAN_FRONTEND=noninteractive
+          lsb_release -a
+          sudo apt-get update
+          sudo apt-get upgrade -y
+          sudo apt-get install wget unzip curl -y
+
+          echo "=========================================================================="
+          echo "Installing Docker..."
+          echo "=========================================================================="
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sudo sh get-docker.sh
+          sudo docker buildx create \
+            --name container-builder \
+            --driver docker-container \
+            --bootstrap --use
+
+          echo "=========================================================================="
+          echo "Login to ghcr.io..."
+          echo "=========================================================================="
+          echo $GITHUB_TOKEN | sudo docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+
+          echo "=========================================================================="
+          echo "Installing GH CLI..."
+          echo "=========================================================================="
+          export GH_TOKEN=$GITHUB_TOKEN
+          sudo mkdir -p -m 755 /etc/apt/keyrings \
+          	&& wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg > /dev/null \
+          	&& sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+          	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+          	&& sudo apt update \
+          	&& sudo apt install gh -y
+
+          echo "=========================================================================="
+          echo "Clone project..."
+          echo "=========================================================================="
+          sudo mkdir -p /workspace
+          sudo chown azureuser /workspace
+          cd /workspace
+          gh repo clone ietf-tools/rfced-xfer -- --depth=1 --no-tags
+          cd rfced-xfer
+
+          echo "=========================================================================="
+          echo "Do stuff here!"
+          echo "=========================================================================="
+          # docker run ...
+
+    - name: Destroy Build VM + resources
+      if: always()
+      run: |
+        echo "Terminate VM..."        
+        az vm delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }} --yes --force-deletion true
+        echo "Delete Public IP..."
+        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}PublicIP --resource-type "Microsoft.Network/publicIPAddresses"
+        echo "Delete Network Security Group..."
+        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}NSG --resource-type "Microsoft.Network/networkSecurityGroups"
+        echo "Delete Virtual Network..."
+        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}VNET --resource-type "Microsoft.Network/virtualNetworks"
+        echo "Logout from Azure..."
+        az logout
