@@ -137,6 +137,7 @@ jobs:
           sudo docker run -d --name mysql_src -e MARIADB_PASSWORD=rfced12345 -e MARIADB_USER=rfced -e MARIADB_DATABASE=rfced -p 3306:3306 mariadb:10.5
           echo "Waiting for DB container to come online ..."
           /usr/local/bin/wait-for localhost:3306 -t 30 -- echo "MariaDB ready"
+          sudo docker ps
           echo "Querying latest dump..."
           export LATESTDBKEY=$(az storage blob list -c database --prefix rfcpa/rfced --query "[-1:].name | [0]" --out tsv)
           echo "Downloading / Importing latest DB dump ($LATESTDBKEY)..."
@@ -150,13 +151,13 @@ jobs:
     - name: Destroy Build VM + resources
       if: always()
       run: |
-        echo "Terminate VM..."        
-        az vm delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }} --yes --force-deletion true
-        echo "Delete Public IP..."
-        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}PublicIP --resource-type "Microsoft.Network/publicIPAddresses"
-        echo "Delete Network Security Group..."
-        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}NSG --resource-type "Microsoft.Network/networkSecurityGroups"
-        echo "Delete Virtual Network..."
-        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}VNET --resource-type "Microsoft.Network/virtualNetworks"
+        # echo "Terminate VM..."        
+        # az vm delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }} --yes --force-deletion true
+        # echo "Delete Public IP..."
+        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}PublicIP --resource-type "Microsoft.Network/publicIPAddresses"
+        # echo "Delete Network Security Group..."
+        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}NSG --resource-type "Microsoft.Network/networkSecurityGroups"
+        # echo "Delete Virtual Network..."
+        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}VNET --resource-type "Microsoft.Network/virtualNetworks"
         echo "Logout from Azure..."
         az logout
