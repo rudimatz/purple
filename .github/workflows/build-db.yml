@@ -160,7 +160,7 @@ jobs:
           echo "=========================================================================="
           echo "Export PostgreSQL DB dump..."
           echo "=========================================================================="
-          sudo docker compose exec db pg_dump -U postgres -F c --clean --no-owner --no-privileges purple | az storage blob upload --data @- -c database -n purple/$(date +"%FT%H%M").dump
+          sudo docker compose exec db pg_dump -U postgres -F c --clean --no-owner --no-privileges purple | az storage blob upload --data @- -c database -n purple/$(date +"%FT%H%M").dump --tier Cool
 
     - name: Destroy Build VM + resources
       if: always()
