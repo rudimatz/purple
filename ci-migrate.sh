@@ -5,9 +5,6 @@ cd /workspace
 # Add /workspace as a safe git directory
 git config --global --add safe.directory /workspace
 
-# Turn off git info in zsh prompt (causes slowdowns)
-git config oh-my-zsh.hide-info 1
-
 # Install requirements.txt dependencies
 wget -O rpcapi.yaml https://raw.githubusercontent.com/ietf-tools/datatracker/feat/rpc-api/rpcapi.yaml
 npx --yes @openapitools/openapi-generator-cli generate  # config in openapitools.json
@@ -20,6 +17,8 @@ sudo nginx
 # Wait for DB container
 echo "Waiting for DB container to come online..."
 /usr/local/bin/wait-for db:5432 -- echo "PostgreSQL ready"
+echo "Waiting for RFCED DB Container to come online..."
+/usr/local/bin/wait-for rfced:3306 -- echo "MariaDB ready"
 
 # Run migration
 echo "Running xfer_from_rfced migration..."
