@@ -140,7 +140,7 @@ jobs:
           echo "=========================================================================="
           echo "Configure Datatracker..."
           echo "=========================================================================="
-          cp -f rfed-xfer/docker/docker-compose.datatracker.yml datatracker/
+          cp -f rfced-xfer/docker/docker-compose.datatracker.yml datatracker/
           sed -i "s/'HOST': 'db',/'HOST': 'datatrackerdb',/" datatracker/docker/configs/settings_postgresqldb.py
 
           echo "=========================================================================="
