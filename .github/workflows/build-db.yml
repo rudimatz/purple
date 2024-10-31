@@ -143,7 +143,7 @@ jobs:
           echo "=========================================================================="
           echo "Run migration script"
           echo "=========================================================================="
-          sudo docker compose exec app python ./manage.py xfer_from_rfced
+          sudo docker compose exec app bash ci-migrate.sh
 
     - name: Destroy Build VM + resources
       if: always()
