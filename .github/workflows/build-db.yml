@@ -84,6 +84,12 @@ jobs:
           sudo apt-get install wget unzip gzip curl -y
 
           echo "=========================================================================="
+          echo "Fetching wait-for utility..."
+          echo "=========================================================================="
+          sudo wget -P /usr/local/bin https://raw.githubusercontent.com/eficode/wait-for/v2.1.3/wait-for
+          sudo chmod +rx /usr/local/bin/wait-for
+
+          echo "=========================================================================="
           echo "Installing Docker..."
           echo "=========================================================================="
           curl -fsSL https://get.docker.com -o get-docker.sh
@@ -127,8 +133,10 @@ jobs:
           echo "=========================================================================="
           echo "Import latest rfced DB dump..."
           echo "=========================================================================="
-          echo "Creating MySQL container..."
+          echo "Creating MariaDB container..."
           sudo docker run -d --name mysql_src -e MARIADB_PASSWORD=rfced12345 -e MARIADB_USER=rfced -e MARIADB_DATABASE=rfced mariadb:10.5
+          echo "Waiting for DB container to come online ..."
+          /usr/local/bin/wait-for localhost:3306 -- echo "MariaDB ready"
           echo "Querying latest dump..."
           export LATESTDBKEY=$(az storage blob list -c database --prefix rfcpa/rfced --query "[-1:].name | [0]" --out tsv)
           echo "Downloading / Importing latest DB dump ($LATESTDBKEY)..."
