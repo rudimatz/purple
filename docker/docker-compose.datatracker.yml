@@ -1,13 +1,16 @@
 services:
     datatracker:
         build:
-            context: /workspace/datatracker
-            dockerfile: docker/app.Dockerfile
+            context: ../datatracker  # relative to the rfced-xfer docker-compose.yml
+            dockerfile: docker/app.Dockerfile  # relative to the build context
 
         init: true
 
         # Overrides default command so things don't shut down after the process ends.
         command: /bin/zsh /docker-init.sh ietf/manage.py runserver 8001
+
+        volumes:
+          - ../datatracker:/workspace  # host path relative to rfced-xfer docker-compose.yml
 
         # Runs app on the same network as the database container, allows "forwardPorts" in devcontainer.json function.
         # network_mode: service:db
