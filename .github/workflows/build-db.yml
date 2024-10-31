@@ -84,12 +84,6 @@ jobs:
           sudo apt-get install wget unzip gzip curl -y
 
           echo "=========================================================================="
-          echo "Fetching wait-for utility..."
-          echo "=========================================================================="
-          sudo wget -P /usr/local/bin https://raw.githubusercontent.com/eficode/wait-for/v2.1.3/wait-for
-          sudo chmod +rx /usr/local/bin/wait-for
-
-          echo "=========================================================================="
           echo "Installing Docker..."
           echo "=========================================================================="
           curl -fsSL https://get.docker.com -o get-docker.sh
@@ -131,35 +125,36 @@ jobs:
           cd rfced-xfer
 
           echo "=========================================================================="
-          echo "Import latest rfced DB dump..."
+          echo "Fetch latest rfced DB dump..."
           echo "=========================================================================="
-          echo "Creating MariaDB container..."
-          sudo docker run -d --name db_src -e MARIADB_PASSWORD=rfced12345 -e MARIADB_USER=rfced -e MARIADB_DATABASE=rfced -e MARIADB_ROOT_PASSWORD=rfced12345 -p 3306:3306 mariadb:10.5
-          echo "Waiting for DB container to come online ..."
-          /usr/local/bin/wait-for localhost:3306 -t 30 -- echo "MariaDB ready"
-          sudo docker ps
           echo "Querying latest dump..."
           export LATESTDBKEY=$(az storage blob list -c database --prefix rfcpa/rfced --query "[-1:].name | [0]" --out tsv)
           echo "Downloading latest DB dump ($LATESTDBKEY)..."
-          az storage blob download -c database -n $LATESTDBKEY | gunzip > rfced_dump.sql
-          echo "Importing dump..."
-          sudo docker exec -i db_src sh -c 'exec mariadb -uroot -prfced12345 --database=rfced < rfced_dump.sql
+          az storage blob download -c database -n $LATESTDBKEY -f dump.sql.gz
 
           echo "=========================================================================="
-          echo "Do stuff here!"
+          echo "Run the project"
           echo "=========================================================================="
-          # docker run ...
+          echo "Building app images..."
+          sudo docker compose -f docker-compose.yml build --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)
+          echo "Launching compose project..."
+          sudo docker compose -f docker-compose.yml up -d
+
+          echo "=========================================================================="
+          echo "Run migration script"
+          echo "=========================================================================="
+          sudo docker compose exec app python ./manage.py xfer_from_rfced
 
     - name: Destroy Build VM + resources
       if: always()
       run: |
-        # echo "Terminate VM..."        
-        # az vm delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }} --yes --force-deletion true
-        # echo "Delete Public IP..."
-        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}PublicIP --resource-type "Microsoft.Network/publicIPAddresses"
-        # echo "Delete Network Security Group..."
-        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}NSG --resource-type "Microsoft.Network/networkSecurityGroups"
-        # echo "Delete Virtual Network..."
-        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}VNET --resource-type "Microsoft.Network/virtualNetworks"
+        echo "Terminate VM..."        
+        az vm delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }} --yes --force-deletion true
+        echo "Delete Public IP..."
+        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}PublicIP --resource-type "Microsoft.Network/publicIPAddresses"
+        echo "Delete Network Security Group..."
+        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}NSG --resource-type "Microsoft.Network/networkSecurityGroups"
+        echo "Delete Virtual Network..."
+        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}VNET --resource-type "Microsoft.Network/virtualNetworks"
         echo "Logout from Azure..."
         az logout
