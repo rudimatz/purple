@@ -1,13 +1,13 @@
 services:
   db:
-    image: postgres:14
+    image: postgres:16
     volumes:
       - postgresdb-data:/var/lib/postgresql/data
     restart: unless-stopped
     environment:
-      - POSTGRES_DB=rpctools
-      - POSTGRES_USER=rpc
-      - POSTGRES_PASSWORD=abcd1234
+      - POSTGRES_DB=purple
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
       - POSTGRES_HOST_AUTH_METHOD=trust
 
   rfced:
@@ -34,9 +34,9 @@ services:
       - MARIADB_USER=root
       - MARIADB_PASSWORD=abcd1234
       - MARIADB_DATABASE=rfced
-      - POSTGRES_DB=rpctools
-      - POSTGRES_USER=rpc
-      - POSTGRES_PASSWORD=abcd1234
+      - POSTGRES_DB=purple
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
       - RPC_API_TOKEN=devtoken
       # OIDC RP client credential for dev instance of datatracker (not secret for dev, will be for production)
       - OIDC_RP_CLIENT_ID=502412
@@ -46,19 +46,6 @@ services:
       - rfced
     extra_hosts:
       - "host.docker.internal:host-gateway"
-
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    restart: unless-stopped
-    environment:
-        - PGADMIN_DEFAULT_EMAIL=dev@ietf.org
-        - PGADMIN_DEFAULT_PASSWORD=dev
-        - PGADMIN_CONFIG_LOGIN_BANNER="Login with dev@ietf.org / dev"
-        - PGADMIN_DISABLE_POSTFIX=True
-        - PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED=False
-        - SCRIPT_NAME=/pgadmin
-    volumes:
-        - ./docker/configs/pgadmin-servers.json:/pgadmin4/servers.json
 
 volumes:
   postgresdb-data:
