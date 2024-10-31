@@ -134,7 +134,7 @@ jobs:
           echo "Import latest rfced DB dump..."
           echo "=========================================================================="
           echo "Creating MariaDB container..."
-          sudo docker run -d --name mysql_src -e MARIADB_PASSWORD=rfced12345 -e MARIADB_USER=rfced -e MARIADB_DATABASE=rfced -p 3306:3306 mariadb:10.5
+          sudo docker run -d --name mysql_src -e MARIADB_PASSWORD=rfced12345 -e MARIADB_USER=rfced -e MARIADB_DATABASE=rfced -e MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1 -p 3306:3306 mariadb:10.5
           echo "Waiting for DB container to come online ..."
           /usr/local/bin/wait-for localhost:3306 -t 30 -- echo "MariaDB ready"
           sudo docker ps
