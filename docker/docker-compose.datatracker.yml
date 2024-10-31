@@ -1,7 +1,7 @@
 services:
     datatracker:
         build:
-            context: .
+            context: /workspace/datatracker
             dockerfile: docker/app.Dockerfile
 
         init: true
