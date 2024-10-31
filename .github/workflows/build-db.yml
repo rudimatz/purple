@@ -129,7 +129,7 @@ jobs:
           echo "Querying latest dump..."
           export LATESTDBKEY=$(az storage blob list -c database --prefix rfcpa/rfced --query "[-1:].name | [0]" --out tsv)
           echo "Downloading latest DB dump ($LATESTDBKEY)..."
-          az storage blob download -c database -n $LATESTDBKEY -f dump.sql.gz
+          az storage blob download -c database -n $LATESTDBKEY -f rfced-xfer/dump.sql.gz
 
           echo "=========================================================================="
           echo "Clone Datatracker feat/rpc-api branch..."
