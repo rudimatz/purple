@@ -19,8 +19,10 @@ sudo nginx
 # Wait for DB container
 echo "Waiting for DB container to come online..."
 /usr/local/bin/wait-for db:5432 -- echo "PostgreSQL ready"
-echo "Waiting for RFCED DB Container to come online..."
+echo "Waiting for RFCED DB container to come online..."
 /usr/local/bin/wait-for rfced:3306 -- echo "MariaDB ready"
+echo "Waiting for datatracker container to come online..."
+/usr/local/bin/wait-for datatracker:8000 -- echo "Datatracker ready"
 
 export DATATRACKER_RPC_API_BASE=http://datatracker:8000/api/rpc
 export DATATRACKER_API_V1_BASE=http://datatracker:8000/api/v1
