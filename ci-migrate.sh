@@ -22,8 +22,8 @@ echo "Waiting for DB container to come online..."
 echo "Waiting for RFCED DB Container to come online..."
 /usr/local/bin/wait-for rfced:3306 -- echo "MariaDB ready"
 
-export DATATRACKER_RPC_API_BASE=http://datatracker:8001/api/rpc
-export DATATRACKER_API_V1_BASE=http://datatracker:8001/api/v1
+export DATATRACKER_RPC_API_BASE=http://datatracker:8000/api/rpc
+export DATATRACKER_API_V1_BASE=http://datatracker:8000/api/v1
 
 # Run Django migrations
 echo "Running Django migrations..."
