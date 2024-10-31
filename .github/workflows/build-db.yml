@@ -65,6 +65,8 @@ jobs:
         GITHUB_SHA: ${{ github.sha }}
         GITHUB_REF_NAME: ${{ github.ref_name }}
         GITHUB_RUN_ID: ${{ github.run_id }}
+        AZURE_STORAGE_ACCOUNT: ietfbackup
+        AZURE_STORAGE_SAS_TOKEN: ${{ secrets.AZURE_STORAGE_SAS_TOKEN }}
         DEBIAN_FRONTEND: noninteractive
       with:
         host: ${{ steps.azlaunch.outputs.ipaddr }}
@@ -72,14 +74,14 @@ jobs:
         username: azureuser
         command_timeout: 60m
         key_path: ${{ github.workspace }}/prvkey.key
-        envs: GITHUB_TOKEN,GITHUB_ACTOR,GITHUB_SHA,GITHUB_REF_NAME,GITHUB_RUN_ID,DEBIAN_FRONTEND
+        envs: GITHUB_TOKEN,GITHUB_ACTOR,GITHUB_SHA,GITHUB_REF_NAME,GITHUB_RUN_ID,AZURE_STORAGE_ACCOUNT,AZURE_STORAGE_SAS_TOKEN,DEBIAN_FRONTEND
         script_stop: true
         script: |
           export DEBIAN_FRONTEND=noninteractive
           lsb_release -a
           sudo apt-get update
           sudo apt-get upgrade -y
-          sudo apt-get install wget unzip curl -y
+          sudo apt-get install wget unzip gzip curl -y
 
           echo "=========================================================================="
           echo "Installing Docker..."
@@ -95,6 +97,12 @@ jobs:
           echo "Login to ghcr.io..."
           echo "=========================================================================="
           echo $GITHUB_TOKEN | sudo docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+
+          echo "=========================================================================="
+          echo "Installing AZ CLI..."
+          echo "=========================================================================="
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          az --version
 
           echo "=========================================================================="
           echo "Installing GH CLI..."
@@ -117,6 +125,16 @@ jobs:
           cd rfced-xfer
 
           echo "=========================================================================="
+          echo "Import latest rfced DB dump..."
+          echo "=========================================================================="
+          echo "Creating MySQL container..."
+          sudo docker run -d --name mysql_src -e MARIADB_PASSWORD=rfced12345 -e MARIADB_USER=rfced -e MARIADB_DATABASE=rfced mariadb:10.5
+          echo "Querying latest dump..."
+          export LATESTDBKEY=$(az storage blob list -c database --prefix rfcpa/rfced --query "[-1:].name | [0]" --out tsv)
+          echo "Downloading / Importing latest DB dump ($LATESTDBKEY)..."
+          az storage blob download -c database -n $LATESTDBKEY | gunzip | sudo docker exec -i mysql_src mariadb --user=rfced --password=rfced12345 --database=rfced
+
+          echo "=========================================================================="
           echo "Do stuff here!"
           echo "=========================================================================="
           # docker run ...
@@ -124,13 +142,13 @@ jobs:
     - name: Destroy Build VM + resources
       if: always()
       run: |
-        echo "Terminate VM..."        
-        az vm delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }} --yes --force-deletion true
-        echo "Delete Public IP..."
-        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}PublicIP --resource-type "Microsoft.Network/publicIPAddresses"
-        echo "Delete Network Security Group..."
-        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}NSG --resource-type "Microsoft.Network/networkSecurityGroups"
-        echo "Delete Virtual Network..."
-        az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}VNET --resource-type "Microsoft.Network/virtualNetworks"
+        # echo "Terminate VM..."        
+        # az vm delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }} --yes --force-deletion true
+        # echo "Delete Public IP..."
+        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}PublicIP --resource-type "Microsoft.Network/publicIPAddresses"
+        # echo "Delete Network Security Group..."
+        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}NSG --resource-type "Microsoft.Network/networkSecurityGroups"
+        # echo "Delete Virtual Network..."
+        # az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}VNET --resource-type "Microsoft.Network/virtualNetworks"
         echo "Logout from Azure..."
         az logout
