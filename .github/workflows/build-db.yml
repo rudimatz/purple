@@ -27,7 +27,7 @@ jobs:
       run: |
         echo "Authenticating to Azure..."
         az login --service-principal -u ${{ secrets.AZ_BUILD_APP_ID }} -p ${{ secrets.AZ_BUILD_PWD }} --tenant ${{ secrets.AZ_BUILD_TENANT_ID }}
-        
+
         echo "Creating VM..."
         vminfo=$(az vm create \
           --resource-group ghaPurple \
@@ -48,7 +48,7 @@ jobs:
         echo "ipaddr=$vminfo" >> "$GITHUB_OUTPUT"
         echo "VM Public IP: $vminfo"
         cat ~/.ssh/id_rsa > ${{ github.workspace }}/prvkey.key
-        
+
         echo "Fetching SSH host public keys..."
         until ssh-keyscan -t rsa $vminfo 2> /dev/null
         do
@@ -116,13 +116,12 @@ jobs:
           	&& sudo apt install gh -y
 
           echo "=========================================================================="
-          echo "Clone project..."
+          echo "Clone rfced-xfer project..."
           echo "=========================================================================="
           sudo mkdir -p /workspace
           sudo chown azureuser /workspace
           cd /workspace
           gh repo clone ietf-tools/rfced-xfer -- --depth=1 --no-tags
-          cd rfced-xfer
 
           echo "=========================================================================="
           echo "Fetch latest rfced DB dump..."
@@ -133,22 +132,35 @@ jobs:
           az storage blob download -c database -n $LATESTDBKEY -f dump.sql.gz
 
           echo "=========================================================================="
-          echo "Run the project"
+          echo "Clone Datatracker feat/rpc-api branch..."
           echo "=========================================================================="
-          echo "Building app images..."
-          sudo docker compose -f docker-compose.yml build --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)
-          echo "Launching compose project..."
-          sudo docker compose -f docker-compose.yml up -d
+          cd /workspace
+          gh repo clone ietf-tools/datatracker -- --branch feat/rpc-api --depth=1 --no-tags
 
           echo "=========================================================================="
-          echo "Run migration script"
+          echo "Configure Datatracker..."
+          echo "=========================================================================="
+          cp -f rfed-xfer/docker/docker-compose.datatracker.yml datatracker/
+          sed -i "s/'HOST': 'db',/'HOST': 'datatrackerdb',/" datatracker/docker/configs/settings_postgresqldb.py
+
+          echo "=========================================================================="
+          echo "Run the project..."
+          echo "=========================================================================="
+          cd /workspace/rfced-xfer
+          echo "Building app images..."
+          sudo docker compose -f docker-compose.yml -f ../datatracker/docker-compose.datatracker.yml build --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)
+          echo "Launching compose project..."
+          sudo docker compose -f docker-compose.yml -f ../datatracker/docker-compose.datatracker.yml up -d
+
+          echo "=========================================================================="
+          echo "Run migration script..."
           echo "=========================================================================="
           sudo docker compose exec app bash ci-migrate.sh
 
     - name: Destroy Build VM + resources
       if: always()
       run: |
-        echo "Terminate VM..."        
+        echo "Terminate VM..."
         az vm delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }} --yes --force-deletion true
         echo "Delete Public IP..."
         az resource delete -g ghaPurple -n tmpGhaBuildVM-${{ github.run_number }}PublicIP --resource-type "Microsoft.Network/publicIPAddresses"
