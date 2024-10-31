@@ -157,6 +157,11 @@ jobs:
           echo "=========================================================================="
           sudo docker compose exec app bash ci-migrate.sh
 
+          echo "=========================================================================="
+          echo "Export PostgreSQL DB dump..."
+          echo "=========================================================================="
+          sudo docker compose exec db pg_dump -U postgres -F c --clean --no-owner --no-privileges purple | az storage blob upload --data @- -c database -n purple/$(date +"%FT%H%M").dump
+
     - name: Destroy Build VM + resources
       if: always()
       run: |
