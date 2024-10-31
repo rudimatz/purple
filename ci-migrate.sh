@@ -20,6 +20,9 @@ echo "Waiting for DB container to come online..."
 echo "Waiting for RFCED DB Container to come online..."
 /usr/local/bin/wait-for rfced:3306 -- echo "MariaDB ready"
 
+# Run Django migrations
+./manage.py migrate --no-input
+
 # Run migration
 echo "Running xfer_from_rfced migration..."
 ./manage.py xfer_from_rfced
