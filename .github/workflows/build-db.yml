@@ -36,7 +36,7 @@ jobs:
           --admin-username azureuser \
           --generate-ssh-keys \
           --priority Spot \
-          --size Standard_D8ads_v5 \
+          --size Standard_D16ads_v5 \
           --max-price -1 \
           --ephemeral-os-disk \
           --os-disk-size-gb 100 \
