@@ -59,6 +59,7 @@ jobs:
 
     - name: Remote SSH into Build VM
       uses: appleboy/ssh-action@25ce8cbbcb08177468c7ff7ec5cbfa236f9341e1
+      timeout-minutes: 60
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         GITHUB_ACTOR: ${{ github.actor }}
