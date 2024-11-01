@@ -48,7 +48,7 @@ ENV npm_config_fund false
 RUN sed -i 's/#force_color_prompt=/force_color_prompt=/' /root/.bashrc
 
 # Fetch wait-for utility
-ADD https://raw.githubusercontent.com/eficode/wait-for/v2.1.3/wait-for /usr/local/bin/
+ADD https://raw.githubusercontent.com/eficode/wait-for/v2.2.4/wait-for /usr/local/bin/
 RUN chmod +rx /usr/local/bin/wait-for
 
 # Create workspace
