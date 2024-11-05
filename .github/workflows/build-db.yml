@@ -166,7 +166,7 @@ jobs:
           echo "=========================================================================="
           echo "Export datatracker PostgreSQL DB dump..."
           echo "=========================================================================="
-          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec datatrackerdb pg_dump -U postgres -F c --clean --no-owner --no-privileges datatracker > datatracker.dump
+          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec datatrackerdb pg_dump -U django -F c --clean --no-owner --no-privileges datatracker > datatracker.dump
           ls -lh datatracker.dump
 
           echo "=========================================================================="
