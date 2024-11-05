@@ -159,15 +159,22 @@ jobs:
           sudo docker compose exec app bash ci-migrate.sh
 
           echo "=========================================================================="
-          echo "Export PostgreSQL DB dump..."
+          echo "Export purple PostgreSQL DB dump..."
           echo "=========================================================================="
           sudo docker compose exec db pg_dump -U postgres -F c --clean --no-owner --no-privileges purple > purple.dump
           ls -lh purple.dump
 
           echo "=========================================================================="
-          echo "Upload PostgreSQL DB dump..."
+          echo "Export datatracker PostgreSQL DB dump..."
           echo "=========================================================================="
-          az storage blob upload -f purple.dump -c database -n purple/$(date +"%FT%H%M").dump --tier Cool
+          sudo docker compose exec datatrackerdb pg_dump -U postgres -F c --clean --no-owner --no-privileges datatracker > datatracker.dump
+          ls -lh datatracker.dump
+
+          echo "=========================================================================="
+          echo "Upload PostgreSQL DB dumps..."
+          echo "=========================================================================="
+          az storage blob upload -f purple.dump -c database -n purple/$(date +"%FT%H%M")-purple.dump --tier Cool
+          az storage blob upload -f datatracker.dump -c database -n purple/$(date +"%FT%H%M")-datatracker.dump --tier Cool
 
     - name: Destroy Build VM + resources
       if: always()
