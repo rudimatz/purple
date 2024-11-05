@@ -141,7 +141,6 @@ jobs:
           echo "=========================================================================="
           echo "Configure Datatracker..."
           echo "=========================================================================="
-          cp -f rfced-xfer/docker/docker-compose.datatracker.yml datatracker/
           sed -i "s/'HOST': 'db',/'HOST': 'datatrackerdb',/" datatracker/docker/configs/settings_postgresqldb.py
 
           echo "=========================================================================="
@@ -149,25 +148,25 @@ jobs:
           echo "=========================================================================="
           cd /workspace/rfced-xfer
           echo "Building app images..."
-          sudo docker compose -f docker-compose.yml -f ../datatracker/docker-compose.datatracker.yml build --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)
+          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml build --build-arg USER_UID=$(id -u) --build-arg USER_GID=$(id -g)
           echo "Launching compose project..."
-          sudo docker compose -f docker-compose.yml -f ../datatracker/docker-compose.datatracker.yml up -d
+          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml up -d
 
           echo "=========================================================================="
           echo "Run migration script..."
           echo "=========================================================================="
-          sudo docker compose exec app bash ci-migrate.sh
+          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec app bash ci-migrate.sh
 
           echo "=========================================================================="
           echo "Export purple PostgreSQL DB dump..."
           echo "=========================================================================="
-          sudo docker compose exec db pg_dump -U postgres -F c --clean --no-owner --no-privileges purple > purple.dump
+          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec db pg_dump -U postgres -F c --clean --no-owner --no-privileges purple > purple.dump
           ls -lh purple.dump
 
           echo "=========================================================================="
           echo "Export datatracker PostgreSQL DB dump..."
           echo "=========================================================================="
-          sudo docker compose exec datatrackerdb pg_dump -U postgres -F c --clean --no-owner --no-privileges datatracker > datatracker.dump
+          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec datatrackerdb pg_dump -U postgres -F c --clean --no-owner --no-privileges datatracker > datatracker.dump
           ls -lh datatracker.dump
 
           echo "=========================================================================="
