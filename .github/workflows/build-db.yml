@@ -172,8 +172,8 @@ jobs:
           echo "=========================================================================="
           echo "Upload PostgreSQL DB dumps..."
           echo "=========================================================================="
-          az storage blob upload -f purple.dump -c database -n purple/$(date +"%FT%H%M")-purple.dump --tier Cool
-          az storage blob upload -f datatracker.dump -c database -n purple/$(date +"%FT%H%M")-datatracker.dump --tier Cool
+          az storage blob upload -f purple.dump -c database -n purple/purple-$(date +"%FT%H%M").dump --tier Cool
+          az storage blob upload -f datatracker.dump -c database -n purple/datatracker-$(date +"%FT%H%M").dump --tier Cool
 
     - name: Destroy Build VM + resources
       if: always()
