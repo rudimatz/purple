@@ -166,7 +166,11 @@ jobs:
           echo "=========================================================================="
           echo "Export datatracker PostgreSQL DB dump..."
           echo "=========================================================================="
-          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec datatrackerdb pg_dump -U django -F c --clean --no-owner --no-privileges datatracker > datatracker.dump
+          # Only exports datatracker schema. The public schema must exist and contain the required extensions.
+          # The following set is sufficient (but perhaps not minimal):
+          #  bloom, btree_gin, btree_gist, citext, fuzzystrmatch, pg_buffercache, pg_stat_statements, pg_trgm,
+          #  pgrowlocks, pgstattuple
+          sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec datatrackerdb pg_dump -U django -F c --clean --no-owner --no-privileges --schema=datatracker datatracker > datatracker.dump
           ls -lh datatracker.dump
 
           echo "=========================================================================="
