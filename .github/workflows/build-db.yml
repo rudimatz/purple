@@ -1,6 +1,10 @@
 name: Build DB Image
 
 on:
+  # Run early every North American morning, not near the top of an hour
+  schedule:
+   - cron: '23 9 * * *'
+
   workflow_dispatch:
 
 concurrency:
