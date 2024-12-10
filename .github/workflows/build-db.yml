@@ -83,6 +83,12 @@ jobs:
         ls -lh purple.dump
 
         echo "=========================================================================="
+        echo "Add purple staging OIDC redirect url to client"
+        echo "=========================================================================="
+        sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec datatrackerdb psql -U django -d datatracker -c "INSERT INTO datatracker.oidc_provider_client VALUES (DEFAULT, 'Purple Staging', '173327', 'd78945c377b5ed188dfa88b0cfadea9049a5d41fe7934847fdf2a5bc', E'https://purple.staging.ietf.org/oidc/callback/', '$(date +'%Y-%m-%d')', 'confidential', 'RS256', 'tools-help@ietf.org', '', '', 'https://ietf.org', '', FALSE, FALSE, 2706, '');"
+        sudo docker compose -f docker-compose.yml -f docker/docker-compose.datatracker.yml exec datatrackerdb psql -U django -d datatracker -c "INSERT INTO datatracker.oidc_provider_client_response_types (client_id, responsetype_id) SELECT id, 1 FROM datatracker.oidc_provider_client WHERE client_id='173327';"
+
+        echo "=========================================================================="
         echo "Export datatracker PostgreSQL DB dump..."
         echo "=========================================================================="
         # Only exports datatracker schema. The public schema must exist and contain the required extensions.
