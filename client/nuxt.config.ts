@@ -26,7 +26,8 @@ export default defineNuxtConfig({
     'nuxt-headlessui',
     'nuxt-icon',
     'nuxt-snackbar',
-    'nuxt-svgo'
+    'nuxt-svgo',
+    'nuxt-security'
   ],
   robots: {
     credits: false,
@@ -54,6 +55,15 @@ export default defineNuxtConfig({
           api: 'modern-compiler'
         }
       }
+    },
+    optimizeDeps: {
+      // Deps that vite does not detect statically
+      include: [
+        'lodash-es',
+        'luxon',
+        'humanize-duration',
+        'vue3-snackbar'
+      ]
     },
     plugins: [
       {
