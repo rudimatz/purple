@@ -34,3 +34,6 @@ echo "Running Django migrations..."
 # Run rfced data migration
 echo "Running xfer_from_rfced migration..."
 ./manage.py xfer_from_rfced
+
+echo "Setting database dump timestamp..."
+./manage.py add_dumpinfo
