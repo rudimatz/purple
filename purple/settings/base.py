@@ -30,7 +30,6 @@ INSTALLED_APPS = [
     "datatracker.apps.DatatrackerConfig",
     "rpc.apps.RpcConfig",
     "rpcauth.apps.RpcAuthConfig",
-    "rfced.apps.RfcedConfig",
 ]
 
 MIDDLEWARE = [
@@ -64,21 +63,6 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "purple.wsgi.application"
 
-
-# Database
-# https://docs.djangoproject.com/en/4.2/ref/settings/#databases
-
-DATABASES = {
-    "rfced": {
-        "ENGINE": "django.db.backends.mysql",
-        "NAME": os.environ.get("MARIADB_DATABASE"),
-        "USER": os.environ.get("MARIADB_USER"),
-        "PASSWORD": os.environ.get("MARIADB_PASSWORD"),
-        "HOST": "rfced",
-    },
-}
-
-DATABASE_ROUTERS = ["rfced.routers.RfcedRouter"]
 
 # Authentication
 AUTHENTICATION_BACKENDS = (
