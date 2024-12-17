@@ -22,3 +22,9 @@ DATABASES |= {
 
 DATABASE_ROUTERS = ["rfced.routers.RfcedRouter"]
 
+# Allow the environment to override the API base for the xfer
+
+if "DATATRACKER_RPC_API_BASE" in os.environ:
+    DATATRACKER_RPC_API_BASE = os.environ.get("DATATRACKER_RPC_API_BASE")
+if "DATATRACKER_API_V1_BASE" in os.environ:
+    DATATRACKER_API_V1_BASE = os.environ.get("DATATRACKER_API_V1_BASE")
