@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e -o pipefail  # pipefail is paranoia in case we add pipes
 
 cd /workspace
 
@@ -15,6 +16,9 @@ pip3 --disable-pip-version-check --no-cache-dir install --user --no-warn-script-
 # Run nginx
 echo "Starting nginx..."
 sudo nginx
+
+# Arrange for nginx shutdown (mostly useful in debugging)
+trap 'echo "Stopping nginx..."; sudo nginx -s quit' EXIT
 
 # Wait for DB container
 echo "Waiting for DB container to come online..."
