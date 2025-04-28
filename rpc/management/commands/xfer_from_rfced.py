@@ -60,6 +60,21 @@ def get_rfc_original_streams(*, rpcapi: rpcapi_client.DefaultApi):
 
 
 @with_rpcapi
+def person_by_id(id, *, rpcapi: rpcapi_client.DefaultApi):
+    try:
+        return rpcapi.get_person_by_id(id)
+    except rpcapi_client.ApiException as e:
+        if e.status == 404:
+            return None
+        else:
+            raise e
+
+@with_rpcapi
+def persons_by_id(ids, *, rpcapi: rpcapi_client.DefaultApi):
+    return rpcapi.get_persons(ids)
+
+
+@with_rpcapi
 def persons_by_email(emails, *, rpcapi: rpcapi_client.DefaultApi):
     result = dict()
     for item in rpcapi.persons_by_email(emails):
@@ -151,6 +166,7 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        self.validate_persons()
         self.import_labels()
         self.build_rpc_people()
         self.get_published_rfcs()
@@ -171,6 +187,21 @@ class Command(BaseCommand):
         # Maybe make a Subseries model.
 
         # END TODO
+
+    def validate_persons(self):
+        # Check that all persons in the RfcMatchHelper list are returned by rpc-api
+        missing_persons = []
+        rfc_match_helper = RfcMatchHelper()
+        person_ids = list(map(lambda item: item[0][1], rfc_match_helper.MATCHES.items()))
+        rpcapi_persons = persons_by_id(person_ids)
+
+        for person_id in tqdm(person_ids, desc="validate_persons"):
+            if str(person_id) not in rpcapi_persons:
+                missing_persons.append(person_id)
+
+        if missing_persons:
+            print(f"Missing persons: {missing_persons}")
+            raise CommandError("Script aborted! Please check the rpc-api for missing persons.")
 
     def update_draftinfo(self, docnames):
         updoc = update_documents(docnames)
