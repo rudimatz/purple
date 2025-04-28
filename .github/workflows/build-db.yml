@@ -50,11 +50,31 @@ jobs:
         DEBIAN_FRONTEND: noninteractive
       run: |
         echo "=========================================================================="
-        echo "Fetch latest rfced DB dump..."
+        echo "Download datatracker-db:latest image..."
         echo "=========================================================================="
-        echo "Querying latest dump..."
-        export LATESTDBKEY=$(az storage blob list -c database --prefix rfcpa/rfced --query "[-1:].name | [0]" --out tsv)
-        echo "Downloading latest DB dump ($LATESTDBKEY)..."
+        # Grab image and tag locally to guarantee that docker-compose.datatracker.yml uses the same one
+        sudo docker image pull ghcr.io/ietf-tools/datatracker-db:latest
+        sudo docker image tag ghcr.io/ietf-tools/datatracker-db:latest "datatracker-db:rfced-xfer"
+        echo DATATRACKER_DB_IMAGE=datatracker-db:rfced-xfer >> rfced-xfer/.env
+        # Extract the timestamp from the datatracker db snapshot filename. Must convert from
+        # YYYY-MM-DDThhmm to YYYY-MM-DDThh:mm (i.e., add the ':' to the time component)
+        export DT_SNAPSHOT_TIMESTAMP=$(sudo docker inspect datatracker-db:rfced-xfer | jq ".[0].Config.Env" | sed -En 's/^ *"DATATRACKER_SNAPSHOT=([0-9-]+T[0-9]{2})([0-9]{2})\.dump",? *$/\1:\2/p')
+
+        echo "=========================================================================="
+        echo "Fetch rfced DB dump..."
+        echo "=========================================================================="
+        if [[ -n "$DT_SNAPSHOT_TIMESTAMP" ]]; then
+          echo "Querying DB dump matching $DT_SNAPSHOT_TIMESTAMP..."
+          # consider the last 24 hours worth of dumps and find the one that immediately precedes the dt dump time
+          export LATESTDBKEY=$(az storage blob list -c database --prefix rfcpa/rfced --query "[-24:] | [?properties.creationTime < '$DT_SNAPSHOT_TIMESTAMP'].name | [-1]" --out tsv)
+        fi
+        if [[ -z "$LATESTDBKEY" ]]; then
+          # don't know the timestamp of the datatracker dump, or failed to find a recent match, so
+          # fall back to the most recent one
+          echo "Falling back to latest DB dump..."
+          export LATESTDBKEY=$(az storage blob list -c database --prefix rfcpa/rfced --query "[-1:].name | [0]" --out tsv)
+        fi
+        echo "Downloading DB dump ($LATESTDBKEY)..."
         az storage blob download -c database -n $LATESTDBKEY -f rfced-xfer/dump.sql.gz
 
         echo "=========================================================================="
