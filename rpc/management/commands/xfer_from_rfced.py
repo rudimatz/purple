@@ -69,6 +69,7 @@ def person_by_id(id, *, rpcapi: rpcapi_client.DefaultApi):
         else:
             raise e
 
+
 @with_rpcapi
 def persons_by_id(ids, *, rpcapi: rpcapi_client.DefaultApi):
     return rpcapi.get_persons(ids)
@@ -95,7 +96,7 @@ def draft_authors(draft_names, *, rpcapi: rpcapi_client.DefaultApi):
 @with_rpcapi
 def update_documents(docnames, *, rpcapi: rpcapi_client.DefaultApi):
     documents = rpcapi.get_drafts_by_names(docnames)
-    for name in tqdm(docnames, desc="update_documents"):
+    for name in tqdm(docnames, desc="update_documents", disable=None):
         if name not in documents:
             print(f"skipping create_or_update of {name}")
             continue
@@ -192,16 +193,20 @@ class Command(BaseCommand):
         # Check that all persons in the RfcMatchHelper list are returned by rpc-api
         missing_persons = []
         rfc_match_helper = RfcMatchHelper()
-        person_ids = list(map(lambda item: item[0][1], rfc_match_helper.MATCHES.items()))
+        person_ids = list(
+            map(lambda item: item[0][1], rfc_match_helper.MATCHES.items())
+        )
         rpcapi_persons = persons_by_id(person_ids)
 
-        for person_id in tqdm(person_ids, desc="validate_persons"):
+        for person_id in tqdm(person_ids, desc="validate_persons", disable=None):
             if str(person_id) not in rpcapi_persons:
                 missing_persons.append(person_id)
 
         if missing_persons:
             print(f"Missing persons: {missing_persons}")
-            raise CommandError("Script aborted! Please check the rpc-api for missing persons.")
+            raise CommandError(
+                "Script aborted! Please check the rpc-api for missing persons."
+            )
 
     def update_draftinfo(self, docnames):
         updoc = update_documents(docnames)
@@ -227,7 +232,8 @@ class Command(BaseCommand):
 
         # Import labels
         for (i, n), c in zip(
-            tqdm(label_id_name_pairs, desc="import_labels"), cycle(TAILWIND_COLORS)
+            tqdm(label_id_name_pairs, desc="import_labels", disable=None),
+            cycle(TAILWIND_COLORS),
         ):
             Label.objects.get_or_create(id=i, slug=n, color=c)
             self.label_name_to_id[n] = i
@@ -282,7 +288,7 @@ class Command(BaseCommand):
         labels = Label.objects.all()
         labels_cached: dict[int, Label] = {label.id: label for label in labels}
 
-        for row in tqdm(rfc_qs, desc="get_published_rfcs"):
+        for row in tqdm(rfc_qs, desc="get_published_rfcs", disable=None):
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
@@ -428,7 +434,7 @@ class Command(BaseCommand):
         labels = Label.objects.all()
         labels_cached: dict[int, Label] = {label.id: label for label in labels}
 
-        for row in tqdm(ip_qs, desc="get_in_process_docs"):
+        for row in tqdm(ip_qs, desc="get_in_process_docs", disable=None):
             is_apr1 = (
                 row.pub_date and row.pub_date.month == 4 and row.pub_date.day == 1
             ) or False
@@ -545,7 +551,9 @@ class Command(BaseCommand):
                 )
         # Focusing first on in-process docs - it's unclear what to do about past assignments
         for doc in tqdm(
-            RfcToBe.objects.filter(disposition_id="in_progress"), desc="get_assignments"
+            RfcToBe.objects.filter(disposition_id="in_progress"),
+            desc="get_assignments",
+            disable=None,
         ):
             if doc not in self.index_id_of:
                 print(f"Skipping assignments for {doc}")
@@ -636,7 +644,11 @@ class Command(BaseCommand):
         ClusterInfo = namedtuple("ClusterInfo", ["document", "order_token"])
         cluster_docs = defaultdict(set)
         for offset, cluster_member in enumerate(
-            tqdm(Clusters.objects.exclude(cluster_id=""), desc="build cluster order"),
+            tqdm(
+                Clusters.objects.exclude(cluster_id=""),
+                desc="build cluster order",
+                disable=None,
+            ),
             start=50000,
         ):
             index_row_qs = Index.objects.filter(
@@ -667,7 +679,9 @@ class Command(BaseCommand):
                     order_token=order_token,
                 )
             )
-        for cluster_id in tqdm(sorted(cluster_docs.keys()), desc="import clusters"):
+        for cluster_id in tqdm(
+            sorted(cluster_docs.keys()), desc="import clusters", disable=None
+        ):
             cluster, _ = Cluster.objects.get_or_create(number=cluster_id)
             ordered_members = sorted(
                 cluster_docs[cluster_id], key=lambda o: int(o.order_token)
@@ -768,6 +782,7 @@ class Command(BaseCommand):
         for rfc in tqdm(
             RfcToBe.objects.filter(disposition_id__in=["published", "in_progress"]),
             desc="building authors and approvers",
+            disable=None,
         ):
             index = Index.objects.get(pk=self.index_id_of[rfc])
             rfced_authors = self.parse_authors(index.authors)
