@@ -444,11 +444,18 @@ class Command(BaseCommand):
                 if not found_doc:
                     print(f"Skipping {row.doc_id} - problem with {row.draft}")
                     continue
+            # Extract the rfc_number if we can
+            if row.doc_id is None or row.doc_id == "RFC":
+                maybe_rfc_number = None
+            else:
+                if not row.doc_id.startswith("RFC"):
+                    print(f"WARNING: DOC-ID '{row.doc_id}' for {row.draft} does not start with 'RFC'")
+                maybe_rfc_number = int(row.doc_id[3:])
             rfc_to_be = RfcToBe.objects.create(
                 disposition_id="in_progress",
                 is_april_first_rfc=is_apr1,
                 draft=found_doc,
-                rfc_number=int(row.doc_id[3:]) if row.doc_id != "RFC" else None,
+                rfc_number=maybe_rfc_number,
                 submitted_format_id=self.source_format_id_from_index(row),
                 submitted_std_level=StdLevelName.objects.from_slug(
                     self.dt_stdlevelname_slug(row.pub_status)
