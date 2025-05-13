@@ -125,6 +125,8 @@ class RpcOIDCAuthBackend(ServiceTokenOIDCAuthenticationBackend):
       roles - list of 2-tuples corresponding to Person's active roles
     """
 
+    ADMIN_ACCESS_ROLE = ["leadmaintainer", "tools"]
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._subject_id = None  # subject ID we are working with
@@ -133,12 +135,16 @@ class RpcOIDCAuthBackend(ServiceTokenOIDCAuthenticationBackend):
     def create_user(self, claims):
         """Create a User following a successful auth"""
         subject_id = claims["sub"]
+        admin_access = self.ADMIN_ACCESS_ROLE in claims["roles"]
+
         try:
             new_user = self.UserModel.objects.create(
                 username=f"dt-person-{subject_id}",
                 datatracker_subject_id=subject_id,
                 name=claims["name"],  # required claim,
                 avatar=claims.get("picture", ""),
+                is_staff=admin_access,
+                is_superuser=admin_access,
             )
         except IntegrityError:
             # exception message gets logged - user only sees a failed auth
@@ -156,6 +162,15 @@ class RpcOIDCAuthBackend(ServiceTokenOIDCAuthenticationBackend):
         if user.avatar != claims.get("picture", ""):
             user.avatar = claims.get("picture")
             updated = True
+
+        admin_access = self.ADMIN_ACCESS_ROLE in claims["roles"]
+        if user.is_staff != admin_access:
+            user.is_staff = admin_access
+            updated = True
+        if user.is_superuser != admin_access:
+            user.is_superuser = admin_access
+            updated = True
+
         if updated:
             user.save()
         return user
