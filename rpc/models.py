@@ -118,7 +118,6 @@ class RfcToBe(models.Model):
             models.UniqueConstraint(
                 fields=["rfc_number"],
                 name="unique_non_null_rfc_number",
-                nulls_distinct=True,
             )
         ]
 
