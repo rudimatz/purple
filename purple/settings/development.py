@@ -1,7 +1,7 @@
 # Copyright The IETF Trust 2024, All Rights Reserved
 """Development-mode Django settings for RPC project"""
 
-import os
+from hashlib import sha384
 
 from .base import *
 
@@ -15,12 +15,9 @@ ALLOWED_HOSTS = []
 
 # Datatracker
 DATATRACKER_RPC_API_TOKEN = os.environ["PURPLE_RPC_API_TOKEN"]
-DATATRACKER_RPC_API_BASE = "http://host.docker.internal:8000"
+DATATRACKER_RPC_API_BASE = "http://host.docker.internal:8000/"
 DATATRACKER_API_V1_BASE = "http://host.docker.internal:8000/api/v1"
-DATATRACKER_BASE = os.environ.get(
-    "NUXT_PUBLIC_DATATRACKER_BASE",  # matches name used by Nuxt runtimeConfig
-    "http://localhost:8000",
-)
+DATATRACKER_BASE = "http://localhost:8000"
 
 
 # OIDC configuration (see also base.py)
@@ -46,21 +43,72 @@ SESSION_COOKIE_NAME = (
 
 DATABASES = {
     "default": {
+        # "ENGINE": "django.db.backends.postgresql",
+        # "NAME": os.environ.get("POSTGRES_DB"),
+        # "USER": os.environ.get("POSTGRES_USER"),
+        # "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
+        # "HOST": "db",
+        # "PORT": 5432,
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.environ.get("POSTGRES_DB"),
-        "USER": os.environ.get("POSTGRES_USER"),
-        "PASSWORD": os.environ.get("POSTGRES_PASSWORD"),
-        "HOST": "db",
-        "PORT": 5432,
+        "NAME": "purple",
+        "USER": "postgres",
+        "PASSWORD": "postgres",
+        "HOST": "host.docker.internal",
+        "PORT": 5455,
     }
 }
 
-# email
-EMAIL_BACKEND = "django.core.mail.backends.smtp.EmailBackend"
-EMAIL_HOST = os.getenv("PURPLE_EMAIL_HOST", "mailpit")
-EMAIL_PORT = int(os.getenv("PURPLE_EMAIL_PORT", 1025))
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "{levelname} {asctime} {module} {process:d} {thread:d} {message}",
+            "style": "{",
+        },
+        "simple": {
+            "format": "{levelname} {asctime} {message}",
+            "style": "{",
+        },
+        "db": {
+            "format": "{asctime} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+        "app_file": {
+            "class": "logging.FileHandler",
+            "filename": os.path.join("/workspace", "logs/app.log"),
+            "formatter": "verbose",
+        },
+        "db_file": {
+            "class": "logging.FileHandler",
+            "filename": os.path.join("/workspace", "logs/db.log"),
+            "formatter": "db",
+        },
+    },
+    "loggers": {
+        "django.db.backends": {
+            "level": "DEBUG",
+            "handlers": ["db_file"],
+            "propagate": False,
+        },
+        "rpc.blocked_assignments": {
+            "level": "INFO",
+            "handlers": ["app_file"],
+            "propagate": False,
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}
 
-# Uncomment to enable caching in development
 # CACHES = {
 #     "default": {
 #         "BACKEND": "django.core.cache.backends.memcached.PyMemcacheCache",
@@ -72,3 +120,51 @@ EMAIL_PORT = int(os.getenv("PURPLE_EMAIL_PORT", 1025))
 #         "TIMEOUT": 600,  # 10 minute default timeout
 #     }
 # }
+
+INSTALLED_APPS = INSTALLED_APPS + [
+    'debug_toolbar',
+    'django_filters',
+]
+
+# Add debug toolbar middleware at the beginning
+MIDDLEWARE = [
+    'debug_toolbar.middleware.DebugToolbarMiddleware',
+    'rpc.middleware.APIDebugMiddleware',  # Add this
+] + MIDDLEWARE
+
+# Configure for API debugging
+DEBUG_TOOLBAR_CONFIG = {
+    'SHOW_TOOLBAR_CALLBACK': lambda request: DEBUG,
+    'SHOW_COLLAPSED': True,
+    'SQL_WARNING_THRESHOLD': 10,  # Warn if more than 10 queries
+}
+
+# Allow toolbar to work with API endpoints
+INTERNAL_IPS = [
+    '127.0.0.1',
+    'localhost',
+]
+
+# If running in Docker, add this:
+import socket
+try:
+    hostname, _, ips = socket.gethostbyname_ex(socket.gethostname())
+    INTERNAL_IPS += ['.'.join(ip.split('.')[:-1] + ['1']) for ip in ips]
+except socket.gaierror:
+    pass
+
+# Enable SQL panel for API responses
+DEBUG_TOOLBAR_PANELS = [
+    'debug_toolbar.panels.sql.SQLPanel',
+    'debug_toolbar.panels.timer.TimerPanel',
+    'debug_toolbar.panels.settings.SettingsPanel',
+    'debug_toolbar.panels.headers.HeadersPanel',
+    'debug_toolbar.panels.request.RequestPanel',
+    'debug_toolbar.panels.staticfiles.StaticFilesPanel',
+    'debug_toolbar.panels.templates.TemplatesPanel',
+    'debug_toolbar.panels.cache.CachePanel',
+    'debug_toolbar.panels.signals.SignalsPanel',
+    'debug_toolbar.panels.logging.LoggingPanel',
+    'debug_toolbar.panels.redirects.RedirectsPanel',
+    'debug_toolbar.panels.profiling.ProfilingPanel',
+]
