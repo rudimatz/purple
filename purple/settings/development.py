@@ -74,18 +74,18 @@ EMAIL_PORT = int(os.getenv("PURPLE_EMAIL_PORT", 1025))
 # }
 
 INSTALLED_APPS = INSTALLED_APPS + [
-    'debug_toolbar',
-    'django_filters',
+    "debug_toolbar",
+    "django_filters",
 ]
 
 # Add debug toolbar middleware
 MIDDLEWARE = [
-    'debug_toolbar.middleware.DebugToolbarMiddleware',
+    "debug_toolbar.middleware.DebugToolbarMiddleware",
 ] + MIDDLEWARE
 
 # Add debug toolbar configuration
 # set IPs where debug toolbar should be shown, might need to add local IPs for docker
 INTERNAL_IPS = [
-    '127.0.0.1',
-    'localhost',
+    "127.0.0.1",
+    "localhost",
 ]
