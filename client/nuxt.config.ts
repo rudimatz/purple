@@ -98,10 +98,5 @@ export default defineNuxtConfig({
         }
       }
     ]
-  },
-  nitro: {
-    routeRules: {
-      '/__debug__/**': { proxy: 'http://localhost:8088/__debug__/**' },
-    },
-  },
+  }
 })
