@@ -73,15 +73,19 @@ EMAIL_PORT = int(os.getenv("PURPLE_EMAIL_PORT", 1025))
 #     }
 # }
 
-INSTALLED_APPS = INSTALLED_APPS + [
+REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] += [
+    "rest_framework.renderers.BrowsableAPIRenderer",
+]
+
+INSTALLED_APPS += [
     "debug_toolbar",
     "django_filters",
 ]
 
 # Add debug toolbar middleware
-MIDDLEWARE = [
+MIDDLEWARE += [
     "debug_toolbar.middleware.DebugToolbarMiddleware",
-] + MIDDLEWARE
+]
 
 # Add debug toolbar configuration
 # set IPs where debug toolbar should be shown, might need to add local IPs for docker
