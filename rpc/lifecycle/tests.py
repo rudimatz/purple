@@ -8,7 +8,9 @@ from rest_framework import serializers
 
 from rpc.factories import (
     AssignmentFactory,
+    DispositionNameFactory,
     PublicationAttemptFactory,
+    RfcToBeActionHolderFactory,
     RfcToBeFactory,
     RpcRoleFactory,
 )
@@ -22,6 +24,7 @@ from .activities import (
     complete_activities,
     pending_activities,
 )
+from .blocked_assignments import get_block_reasons
 from .publication import (
     AmbiguousFilesError,
     MissingFilesError,
@@ -369,3 +372,42 @@ class PublishRfcToBeTests(TestCase):
             _do_publish_rfctobe(rfctobe, self.EXPECTED_HEAD, rpcapi=MagicMock())
 
         self.assertIn("uploading its files failed", str(ctx.exception))
+
+
+class BlockedDispositionTests(TestCase):
+    """A document is only blocked while there is still work to block."""
+
+    def _rfc_that_would_block(self, disposition_slug):
+        rfc = RfcToBeFactory(
+            disposition=DispositionNameFactory(slug=disposition_slug),
+        )
+        # The two conditions gate 1 needs: an active formatting assignment, and
+        # somebody still holding an action.
+        AssignmentFactory(
+            rfc_to_be=rfc,
+            role=RpcRoleFactory(slug="formatting"),
+            state=Assignment.State.IN_PROGRESS,
+        )
+        RfcToBeActionHolderFactory(target_rfctobe=rfc, completed=None)
+        return rfc
+
+    def test_in_progress_document_blocks(self):
+        rfc = self._rfc_that_would_block("in_progress")
+        self.assertTrue(get_block_reasons(rfc), "an in-flight document should block")
+
+    def test_published_document_never_blocks(self):
+        rfc = self._rfc_that_would_block("published")
+        self.assertEqual(
+            get_block_reasons(rfc),
+            set(),
+            "a published document has no work left to block",
+        )
+
+    def test_withdrawn_document_never_blocks(self):
+        rfc = self._rfc_that_would_block("withdrawn")
+        self.assertEqual(get_block_reasons(rfc), set())
+
+    def test_created_document_blocks(self):
+        """created is an active disposition, so the rule must not catch it."""
+        rfc = self._rfc_that_would_block("created")
+        self.assertTrue(get_block_reasons(rfc))
