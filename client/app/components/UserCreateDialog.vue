@@ -83,22 +83,6 @@
           </div>
         </div>
 
-        <!-- Timezone -->
-        <div class="space-y-2 px-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:space-y-0 sm:px-6 sm:py-5">
-          <div>
-            <label
-              for="timezone"
-              class="block text-sm font-medium leading-6 text-gray-900 dark:text-neutral-200 sm:mt-1.5"
-              >Timezone</label
-            >
-          </div>
-          <div class="sm:col-span-2">
-            <select id="timezone" v-model="state.timezone" name="timezone" class="form-select">
-              <option v-for="timezone of timezones" :key="timezone">{{ timezone }}</option>
-            </select>
-          </div>
-        </div>
-
         <!-- Hours per week -->
         <div class="space-y-2 px-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:space-y-0 sm:px-6 sm:py-5">
           <div>
@@ -130,7 +114,10 @@
         </div>
         <div class="sm:col-span-2">
           <select id="manager" v-model="state.manager" name="manager" class="form-select">
-            <option v-for="manager of managers" :key="manager">{{ manager }}</option>
+            <option :value="null">—</option>
+            <option v-for="manager of managers" :key="manager.id" :value="manager.id">
+              {{ manager.name }}
+            </option>
           </select>
         </div>
       </div>
@@ -174,13 +161,19 @@
   <ConfirmDialog
     v-model:is-shown="state.confirmShown"
     title="Manager Role Selected"
-    caption="Are you sure you want to create a new team member with the Manager role?" />
+    caption="Are you sure you want to create a new team member with the Manager role?"
+    @confirm="save" />
 </template>
 
 <script setup lang="ts">
+import type { RpcPerson } from '~/purple_client'
 import { overlayModalMethodsKey } from '~/providers/providerKeys'
 
 // DIALOG
+
+const props = withDefaults(defineProps<{ people?: RpcPerson[] }>(), {
+  people: () => []
+})
 
 const overlayModalMethods = inject(overlayModalMethodsKey)
 if (!overlayModalMethods) {
@@ -194,9 +187,8 @@ type State = {
   name: string
   email: string
   datatracker: string
-  timezone: string
   hours: number
-  manager: string
+  manager: number | null
   roles: string[]
   confirmShown: boolean
 }
@@ -205,11 +197,8 @@ const state = reactive<State>({
   name: '',
   email: '',
   datatracker: '',
-  timezone: import.meta.client
-    ? Intl.DateTimeFormat().resolvedOptions().timeZone
-    : 'America/New_York',
   hours: 20,
-  manager: '',
+  manager: null,
   roles: [],
   confirmShown: false
 })
@@ -238,8 +227,9 @@ const handleRoleCheckboxChange = (e: Event) => {
   }
 }
 
-const managers: string[] = []
-const timezones = import.meta.client ? Intl.supportedValuesOf('timeZone') : []
+const managers = computed(() =>
+  props.people.filter((person) => person.roles.some((role) => role.slug === 'manager'))
+)
 
 type Role = {
   value: string
@@ -288,6 +278,10 @@ const roles: Role[] = [
 
 const nameIpt = ref(null)
 
+const api = useApi()
+const snackbar = useSnackbar()
+const isSaving = ref(false)
+
 // METHODS
 
 function close() {
@@ -297,10 +291,35 @@ function close() {
 }
 
 function createUser() {
-  if (state.roles.includes('manager')) {
+  // The manager role grants elevated access, so confirm before saving.
+  if (state.roles.includes('manager') && !state.confirmShown) {
     state.confirmShown = true
-  } else {
+    return
+  }
+  save()
+}
+
+async function save() {
+  state.confirmShown = false
+  if (isSaving.value) {
+    return
+  }
+  isSaving.value = true
+  try {
+    await api.rpcPersonCreate({
+      createRpcPersonRequest: {
+        datatrackerEmail: state.datatracker,
+        hoursPerWeek: state.hours,
+        roles: state.roles,
+        manager: state.manager,
+        isActive: true
+      }
+    })
     ok()
+  } catch (error) {
+    await snackbarForErrors({ snackbar, error, defaultTitle: 'Failed to create team member' })
+  } finally {
+    isSaving.value = false
   }
 }
 </script>
