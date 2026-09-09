@@ -739,6 +739,47 @@ class NotificationTests(TestCase):
         self.assertEqual(n.rfc_to_be, rfc)
         self.assertIn(rfc.name, n.message)
 
+    def test_endpoints_require_auth(self):
+        for method, path in (
+            ("get", "/api/rpc/notifications/"),
+            ("get", "/api/rpc/notifications/unread_count/"),
+            ("post", "/api/rpc/notifications/mark_read/"),
+        ):
+            resp = getattr(self.client, method)(path)
+            self.assertIn(resp.status_code, (401, 403), (path, resp.status_code))
+
+
+class AuthEnforcementTests(TestCase):
+    """Guard against a regression that opens the API to anonymous users."""
+
+    def test_default_permission_is_authenticated(self):
+        from django.conf import settings
+
+        self.assertEqual(
+            settings.REST_FRAMEWORK["DEFAULT_PERMISSION_CLASSES"],
+            ["rest_framework.permissions.IsAuthenticated"],
+        )
+
+    def test_rpc_api_list_endpoints_reject_anonymous(self):
+        # Iterate the router so a new viewset is covered without editing this test.
+        from purple.urls import rpc_router
+
+        checked: list[str] = []
+        for pattern in rpc_router.urls:
+            name = getattr(pattern, "name", None)
+            if not name or not name.endswith("-list") or name in checked:
+                continue
+            kwargs = {
+                key: "1" for key in pattern.pattern.regex.groupindex if key != "format"
+            }
+            url = reverse(name, kwargs=kwargs)
+            resp = self.client.get(url)
+            self.assertIn(
+                resp.status_code, (401, 403), msg=f"{url} -> {resp.status_code}"
+            )
+            checked.append(name)
+        self.assertGreaterEqual(len(checked), 15)  # the router yielded real routes
+
 
 class NotificationDotTests(TestCase):
     def setUp(self):
