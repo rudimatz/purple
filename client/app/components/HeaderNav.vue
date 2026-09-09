@@ -1,3 +1,4 @@
+<!-- Copyright The IETF Trust 2026, All Rights Reserved -->
 <template>
   <div
     class="sticky top-0 z-40 flex h-16 shrink-0 items-center gap-x-4 border-b border-gray-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 px-4 shadow-sm sm:gap-x-6 sm:px-6 lg:px-8"

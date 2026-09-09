@@ -1492,7 +1492,6 @@ class Notification(models.Model):
     """
 
     class EventType(models.TextChoices):
-        BLOCKED = "blocked", "document blocked"
         UNBLOCKED = "unblocked", "document unblocked"
 
     recipient = models.ForeignKey(
@@ -1511,9 +1510,7 @@ class Notification(models.Model):
         on_delete=models.CASCADE,
         help_text="Document this notification is about",
     )
-    # Denormalized event detail (draft name, blocking reason names) so a
-    # notification renders without re-deriving state that may since have changed.
-    data = models.JSONField(default=dict, blank=True)
+    message = models.CharField(max_length=255)
     created = models.DateTimeField(default=timezone.now)
 
     class Meta:
@@ -1525,20 +1522,13 @@ class Notification(models.Model):
         return f"{self.get_event_type_display()} for {who}"
 
     @classmethod
-    def notify_block_change(cls, rfc_to_be, *, blocked, recipient=None):
-        """Record that a document was blocked/unblocked. recipient=None broadcasts."""
-        data = {"draft_name": rfc_to_be.name}
-        if blocked:
-            data["reasons"] = sorted(
-                RfcToBeBlockingReason.objects.filter(
-                    rfc_to_be=rfc_to_be, resolved__isnull=True
-                ).values_list("reason__name", flat=True)
-            )
+    def emit(cls, event_type, message, *, rfc_to_be=None, recipient=None):
+        """Create a notification. recipient=None broadcasts to everyone."""
         return cls.objects.create(
             recipient=recipient,
-            event_type=cls.EventType.BLOCKED if blocked else cls.EventType.UNBLOCKED,
+            event_type=event_type,
             rfc_to_be=rfc_to_be,
-            data=data,
+            message=message,
         )
 
 

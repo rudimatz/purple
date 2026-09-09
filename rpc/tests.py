@@ -736,7 +736,8 @@ class NotificationTests(TestCase):
         self.assertEqual(unblocked.count(), 1)
         n = unblocked.get()
         self.assertIsNone(n.recipient)  # broadcast: everyone sees it
-        self.assertEqual(n.data["draft_name"], rfc.name)
+        self.assertEqual(n.rfc_to_be, rfc)
+        self.assertIn(rfc.name, n.message)
 
 
 class NotificationDotTests(TestCase):
@@ -769,7 +770,9 @@ class NotificationDotTests(TestCase):
 
     def test_mark_read_clears_the_broadcast_dot_per_person(self):
         Notification.objects.create(
-            recipient=None, event_type="unblocked", rfc_to_be=RfcToBeFactory(), data={}
+            recipient=None,
+            event_type="unblocked",
+            message="a document was unblocked",
         )
         # No read marker yet: the broadcast is unread for this person.
         self.assertEqual(self._count(), 1)
@@ -786,7 +789,9 @@ class NotificationDotTests(TestCase):
 
     def test_viewer_without_rpcperson_sees_list_but_no_read_tracking(self):
         Notification.objects.create(
-            recipient=None, event_type="unblocked", rfc_to_be=RfcToBeFactory(), data={}
+            recipient=None,
+            event_type="unblocked",
+            message="a document was unblocked",
         )
         # No datatracker_subject_id -> no RpcPerson, so no read state is tracked.
         outsider = get_user_model().objects.create_user(

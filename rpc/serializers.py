@@ -327,7 +327,6 @@ class NotificationSerializer(serializers.ModelSerializer):
     """In-app notification, with a per-request unread flag from the read watermark."""
 
     draft_name = serializers.SerializerMethodField()
-    reasons = serializers.SerializerMethodField()
     unread = serializers.SerializerMethodField()
 
     class Meta:
@@ -335,18 +334,14 @@ class NotificationSerializer(serializers.ModelSerializer):
         fields = [
             "id",
             "event_type",
-            "rfc_to_be",
             "draft_name",
-            "reasons",
+            "message",
             "created",
             "unread",
         ]
 
     def get_draft_name(self, obj) -> str:
-        return obj.data.get("draft_name", "")
-
-    def get_reasons(self, obj) -> list[str]:
-        return obj.data.get("reasons", [])
+        return obj.rfc_to_be.name if obj.rfc_to_be_id else ""
 
     def get_unread(self, obj) -> bool:
         seen_at = self.context.get("seen_at")

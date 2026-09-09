@@ -270,8 +270,11 @@ def _close_blocked_assignments(rfc: RfcToBe) -> bool:
         reason.resolved = now
         reason.save(update_fields=["resolved"])
 
-    # We notify only on unblock: an unblocked doc is ready for someone to pick up.
-    Notification.notify_block_change(rfc, blocked=False)
+    Notification.emit(
+        Notification.EventType.UNBLOCKED,
+        f"{rfc.name} was unblocked",
+        rfc_to_be=rfc,
+    )
     return True
 
 

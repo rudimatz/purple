@@ -2642,10 +2642,9 @@ paths:
     get:
       operationId: notifications_list
       description: |-
-        Current user's in-app notifications: broadcasts plus any addressed to them.
+        In-app notifications: broadcasts everyone sees, plus any addressed to the viewer.
 
-        Broadcasts (recipient is null) are visible to every authenticated user;
-        targeted notifications only to their RpcPerson. Read state is per login user.
+        Read state and the unread count are tracked per RpcPerson
       parameters:
         - name: limit
           required: false
@@ -2674,10 +2673,9 @@ paths:
     post:
       operationId: notifications_mark_read
       description: |-
-        Current user's in-app notifications: broadcasts plus any addressed to them.
+        In-app notifications: broadcasts everyone sees, plus any addressed to the viewer.
 
-        Broadcasts (recipient is null) are visible to every authenticated user;
-        targeted notifications only to their RpcPerson. Read state is per login user.
+        Read state and the unread count are tracked per RpcPerson
       tags:
         - purple
       security:
@@ -2689,10 +2687,9 @@ paths:
     get:
       operationId: notifications_unread_count
       description: |-
-        Current user's in-app notifications: broadcasts plus any addressed to them.
+        In-app notifications: broadcasts everyone sees, plus any addressed to the viewer.
 
-        Broadcasts (recipient is null) are visible to every authenticated user;
-        targeted notifications only to their RpcPerson. Read state is per login user.
+        Read state and the unread count are tracked per RpcPerson
       tags:
         - purple
       security:
@@ -4522,12 +4519,9 @@ components:
           readOnly: true
     EventTypeEnum:
       enum:
-        - blocked
         - unblocked
       type: string
-      description: |-
-        * `blocked` - document blocked
-        * `unblocked` - document unblocked
+      description: "* `unblocked` - document unblocked"
     FinalApproval:
       type: object
       description: Serialize final approval information for an RfcToBe
@@ -5035,18 +5029,12 @@ components:
           readOnly: true
         event_type:
           $ref: "#/components/schemas/EventTypeEnum"
-        rfc_to_be:
-          type: integer
-          nullable: true
-          description: Document this notification is about
         draft_name:
           type: string
           readOnly: true
-        reasons:
-          type: array
-          items:
-            type: string
-          readOnly: true
+        message:
+          type: string
+          maxLength: 255
         created:
           type: string
           format: date-time
@@ -5055,6 +5043,7 @@ components:
           readOnly: true
       required:
         - event_type
+        - message
     NotificationUnreadCount:
       type: object
       properties:

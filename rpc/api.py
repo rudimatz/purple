@@ -1281,10 +1281,7 @@ class AssignmentViewSet(viewsets.ModelViewSet):
 class NotificationViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     """In-app notifications: broadcasts everyone sees, plus any addressed to the viewer.
 
-    Broadcasts (recipient is null) are visible to every authenticated user; targeted
-    notifications only to their RpcPerson. Read state is tracked per RpcPerson only —
-    a viewer without one can still see notifications, but their reads aren't recorded
-    and they get no unread count.
+    Read state and the unread count are tracked per RpcPerson
     """
 
     serializer_class = NotificationSerializer
@@ -1292,7 +1289,7 @@ class NotificationViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
 
     def _rpcperson(self):
         # rpcperson() reaches the datatracker by subject id, so skip users without one
-        # and memoize per request (get_queryset and unread_count both resolve it).
+        # and memoize it — several methods resolve the person within one request.
         if not hasattr(self, "_rpcperson_cache"):
             user = self.request.user
             self._rpcperson_cache = (
@@ -1315,7 +1312,7 @@ class NotificationViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         person = self._rpcperson()
         if person is not None:
             visible |= Q(recipient=person)
-        return Notification.objects.filter(visible).select_related("rfc_to_be")
+        return Notification.objects.filter(visible).select_related("rfc_to_be__draft")
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
@@ -1335,9 +1332,10 @@ class NotificationViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         if person is None:
             return Response({"count": 0})
         seen_at = self._seen_at(person)
-        unread = Q() if seen_at is None else Q(created__gt=seen_at)
-        count = self.get_queryset().filter(unread).count()
-        return Response({"count": count})
+        notifications = self.get_queryset()
+        if seen_at is not None:
+            notifications = notifications.filter(created__gt=seen_at)
+        return Response({"count": notifications.count()})
 
     @extend_schema(
         operation_id="notifications_mark_read", request=None, responses={204: None}

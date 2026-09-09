@@ -1,3 +1,4 @@
+<!-- Copyright The IETF Trust 2026, All Rights Reserved -->
 <template>
   <div class="container mx-auto p-6 max-w-3xl">
     <div class="mb-6 flex items-center justify-between">
@@ -28,23 +29,10 @@
             :class="n.unread ? 'bg-violet-600' : 'bg-transparent'"
             aria-hidden="true" />
           <Icon
-            :name="
-              n.eventType === 'blocked'
-                ? 'solar:lock-keyhole-bold-duotone'
-                : 'solar:lock-keyhole-unlocked-bold-duotone'
-            "
-            :class="n.eventType === 'blocked' ? 'text-red-500' : 'text-green-600'"
-            class="mt-0.5 h-5 w-5 shrink-0" />
+            name="solar:lock-keyhole-unlocked-bold-duotone"
+            class="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
           <div class="min-w-0 flex-1">
-            <div class="text-sm text-gray-900 dark:text-gray-100">
-              <span class="font-semibold">{{ n.draftName }}</span>
-              was {{ n.eventType === 'blocked' ? 'blocked' : 'unblocked' }}
-            </div>
-            <div
-              v-if="n.eventType === 'blocked' && n.reasons?.length"
-              class="mt-1 flex flex-wrap gap-1">
-              <BaseBadge v-for="reason in n.reasons" :key="reason" :label="reason" />
-            </div>
+            <div class="text-sm text-gray-900 dark:text-gray-100">{{ n.message }}</div>
           </div>
           <time
             class="shrink-0 text-xs text-gray-400 dark:text-gray-500"

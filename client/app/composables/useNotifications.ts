@@ -1,3 +1,5 @@
+// Copyright The IETF Trust 2026, All Rights Reserved
+
 import { ref, onBeforeMount, onUnmounted, readonly } from 'vue'
 import type { PurpleApi } from '~/purple_client'
 import { useUserStore } from '~/stores/user'
@@ -41,8 +43,12 @@ export const useNotifications = () => {
 
   const markAllRead = async () => {
     if (!api) return
-    await api.notificationsMarkRead()
-    unreadCount.value = 0
+    try {
+      await api.notificationsMarkRead()
+      unreadCount.value = 0
+    } catch {
+      // leave the count as-is; the next poll re-confirms the true value
+    }
   }
 
   return {

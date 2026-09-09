@@ -7,7 +7,7 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("rpc", "0015_backfill_refqueue_target_rfctobe"),
+        ("rpc", "0016_label_text_description"),
     ]
 
     operations = [
@@ -49,14 +49,11 @@ class Migration(migrations.Migration):
                 (
                     "event_type",
                     models.CharField(
-                        choices=[
-                            ("blocked", "document blocked"),
-                            ("unblocked", "document unblocked"),
-                        ],
+                        choices=[("unblocked", "document unblocked")],
                         max_length=32,
                     ),
                 ),
-                ("data", models.JSONField(blank=True, default=dict)),
+                ("message", models.CharField(max_length=255)),
                 ("created", models.DateTimeField(default=django.utils.timezone.now)),
                 (
                     "recipient",
