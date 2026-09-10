@@ -477,11 +477,9 @@ class MetadataComparator:
         return None
 
     def compare_revision(self):
-        """Check the RFCXML rev against the datatracker, then the database.
+        """Compare the RFCXML rev with the datatracker's, then with the database.
 
-        Any disagreement or uncertainty between RFCXML and datatracker is a
-        hard error: nothing is auto-fixable until a publisher has looked at it.
-        Only when they agree is a stale rfc_to_be.rev offered as a fix.
+        Unknown counts as disagreement
         """
         db_value = self.rfc_to_be.rev or ""
         xml_rev, xml_problem = self._doc_name_rev
