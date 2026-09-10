@@ -103,25 +103,6 @@
         </div>
       </div>
 
-      <!-- Manager -->
-      <div class="space-y-2 px-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:space-y-0 sm:px-6 sm:py-5">
-        <div>
-          <label
-            for="manager"
-            class="block text-sm font-medium leading-6 text-gray-900 dark:text-neutral-200 sm:mt-1.5"
-            >Manager</label
-          >
-        </div>
-        <div class="sm:col-span-2">
-          <select id="manager" v-model="state.manager" name="manager" class="form-select">
-            <option :value="null">—</option>
-            <option v-for="manager of managers" :key="manager.id" :value="manager.id">
-              {{ manager.name }}
-            </option>
-          </select>
-        </div>
-      </div>
-
       <!-- Roles -->
       <div class="space-y-2 px-4 sm:grid sm:grid-cols-3 sm:gap-4 sm:space-y-0 sm:px-6 sm:py-5">
         <div>
@@ -166,14 +147,9 @@
 </template>
 
 <script setup lang="ts">
-import type { RpcPerson } from '~/purple_client'
 import { overlayModalMethodsKey } from '~/providers/providerKeys'
 
 // DIALOG
-
-const props = withDefaults(defineProps<{ people?: RpcPerson[] }>(), {
-  people: () => []
-})
 
 const overlayModalMethods = inject(overlayModalMethodsKey)
 if (!overlayModalMethods) {
@@ -188,7 +164,6 @@ type State = {
   email: string
   datatracker: string
   hours: number
-  manager: number | null
   roles: string[]
   confirmShown: boolean
 }
@@ -198,7 +173,6 @@ const state = reactive<State>({
   email: '',
   datatracker: '',
   hours: 20,
-  manager: null,
   roles: [],
   confirmShown: false
 })
@@ -226,10 +200,6 @@ const handleRoleCheckboxChange = (e: Event) => {
     state.roles.splice(indexOf, 1)
   }
 }
-
-const managers = computed(() =>
-  props.people.filter((person) => person.roles.some((role) => role.slug === 'manager'))
-)
 
 type Role = {
   value: string
@@ -311,7 +281,6 @@ async function save() {
         datatrackerEmail: state.datatracker,
         hoursPerWeek: state.hours,
         roles: state.roles,
-        manager: state.manager,
         isActive: true
       }
     })

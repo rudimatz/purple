@@ -109,7 +109,6 @@ async function newTeamMember() {
   try {
     await openOverlayModal({
       component: UserCreateDialog,
-      componentProps: { people: people.value },
       mode: 'side'
     })
   } catch {
