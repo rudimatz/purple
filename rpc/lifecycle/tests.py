@@ -1,5 +1,4 @@
 # Copyright The IETF Trust 2025-2026, All Rights Reserved
-import logging
 from unittest.mock import MagicMock, patch
 
 import jsonschema.exceptions
@@ -183,7 +182,6 @@ class PublicationTests(TestCase):
         )
 
     def test_record_failed_publication_attempt(self):
-        logging.disable(logging.WARNING)  # squelch warnings
         rfc_to_be = RfcToBeFactory()
         assert isinstance(rfc_to_be, RfcToBe)
 
@@ -215,7 +213,6 @@ class PublicationTests(TestCase):
             rfc_to_be.publicationattempt.status, PublicationAttempt.Status.FAILED
         )
         self.assertEqual(rfc_to_be.publicationattempt.detail, "bad mojo")
-        logging.disable(logging.NOTSET)
 
     def test_clear_failed_publication_attempt(self):
         rfctobes = [pa.rfc_to_be for pa in PublicationAttemptFactory.create_batch(2)]
