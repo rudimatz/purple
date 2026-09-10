@@ -4328,11 +4328,8 @@ components:
         - title
     CreateRpcPerson:
       type: object
-      description: |-
-        Create an RpcPerson, linking the datatracker account by its login email.
-
-        ``datatracker_email`` has no model field of its own — the view resolves it to
-        the ``datatracker_person`` FK, so this serializer is only usable via that view.
+      description: Create an RpcPerson, linking the datatracker account by its login
+        email.
       properties:
         id:
           type: integer
@@ -4352,11 +4349,8 @@ components:
           type: boolean
     CreateRpcPersonRequest:
       type: object
-      description: |-
-        Create an RpcPerson, linking the datatracker account by its login email.
-
-        ``datatracker_email`` has no model field of its own — the view resolves it to
-        the ``datatracker_person`` FK, so this serializer is only usable via that view.
+      description: Create an RpcPerson, linking the datatracker account by its login
+        email.
       properties:
         datatracker_email:
           type: string

@@ -1786,12 +1786,9 @@ class RpcPersonSerializer(serializers.ModelSerializer):
 
 
 class CreateRpcPersonSerializer(serializers.ModelSerializer):
-    """Create an RpcPerson, linking the datatracker account by its login email.
+    """Create an RpcPerson, linking the datatracker account by its login email."""
 
-    ``datatracker_email`` has no model field of its own — the view resolves it to
-    the ``datatracker_person`` FK, so this serializer is only usable via that view.
-    """
-
+    # No model field of its own; the view resolves it to the datatracker_person FK.
     datatracker_email = serializers.EmailField(write_only=True)
     roles = serializers.SlugRelatedField(
         slug_field="slug",
