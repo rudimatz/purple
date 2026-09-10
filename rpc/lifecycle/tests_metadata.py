@@ -205,42 +205,92 @@ class InlineTextTests(TestCase):
         )
 
 
-class CompareRevisionTests(TestCase):
-    """The revision row compares the working rev against the datatracker's latest."""
+class ParseDocNameTests(TestCase):
+    def test_doc_name_is_captured_verbatim(self):
+        xml = '<rfc docName="draft-ietf-foo-16"><front><title>T</title></front></rfc>'
+        self.assertEqual(Metadata.parse_rfc_xml(xml)["doc_name"], "draft-ietf-foo-16")
 
-    def _comparator(self, rev, latest):
-        rfc = RfcToBeFactory(rev=rev)
-        comparator = MetadataComparator(rfc, {"title": rfc.title})
+    def test_missing_doc_name_is_empty(self):
+        xml = "<rfc><front><title>T</title></front></rfc>"
+        self.assertEqual(Metadata.parse_rfc_xml(xml)["doc_name"], "")
+
+
+class CompareRevisionTests(TestCase):
+    """Document and datatracker must agree before the database rev is judged."""
+
+    DRAFT = "draft-ietf-foo-bar"
+
+    def _row(self, rev, *, doc_name, latest):
+        rfc = RfcToBeFactory(rev=rev, draft__name=self.DRAFT)
+        comparator = MetadataComparator(rfc, {"title": rfc.title, "doc_name": doc_name})
         # Bypass the datatracker fetch by priming the cached_property.
         comparator.__dict__["latest_rev"] = latest
-        return comparator
+        return comparator.compare_revision()
 
-    def test_matches_latest(self):
-        row = self._comparator("05", "05").compare_revision()
-        self.assertTrue(row["is_match"])
-        self.assertFalse(row["is_error"])
-
-    def test_behind_latest_is_a_fixable_error(self):
-        row = self._comparator("05", "07").compare_revision()
+    def _assert_hard_error(self, row):
         self.assertFalse(row["is_match"])
-        self.assertTrue(row["is_error"])  # blocks publication
-        self.assertTrue(row["can_fix"])  # offers a fix
-        self.assertEqual(row["db_value"], "05")  # left: working rev
-        self.assertEqual(row["xml_value"], "07")  # right: datatracker latest
+        self.assertTrue(row["is_error"])
+        self.assertFalse(row["can_fix"])
+        self.assertIn("publisher must resolve", row["detail"])
 
-    def test_unfetchable_latest_does_not_block(self):
-        row = self._comparator("05", None).compare_revision()
+    def test_all_agree(self):
+        row = self._row("16", doc_name=f"{self.DRAFT}-16", latest="16")
         self.assertTrue(row["is_match"])
         self.assertFalse(row["is_error"])
-        self.assertFalse(row["can_fix"])
+
+    def test_agreed_but_database_stale_is_fixable(self):
+        row = self._row("15", doc_name=f"{self.DRAFT}-16", latest="16")
+        self.assertFalse(row["is_match"])
+        self.assertTrue(row["is_error"])
+        self.assertTrue(row["can_fix"])
+        self.assertEqual(row["db_value"], "15")
+        self.assertEqual(row["xml_value"], "16")
+
+    def test_document_and_datatracker_disagree(self):
+        row = self._row("16", doc_name=f"{self.DRAFT}-16", latest="17")
+        self._assert_hard_error(row)
+        self.assertIn("-16", row["detail"])
+        self.assertIn("-17", row["detail"])
+
+    def test_doc_name_for_another_draft(self):
+        row = self._row("16", doc_name="draft-someone-else-16", latest="16")
+        self._assert_hard_error(row)
+        self.assertIn("not for draft", row["detail"])
+        self.assertEqual(row["xml_value"], "")
+
+    def test_doc_name_without_revision_suffix(self):
+        row = self._row("16", doc_name=f"{self.DRAFT}-final", latest="16")
+        self._assert_hard_error(row)
+        self.assertIn("no revision suffix", row["detail"])
+
+    def test_missing_doc_name(self):
+        row = self._row("16", doc_name="", latest="16")
+        self._assert_hard_error(row)
+        self.assertIn("docName not recorded", row["detail"])
+
+    def test_unfetchable_latest_blocks(self):
+        row = self._row("16", doc_name=f"{self.DRAFT}-16", latest=None)
+        self._assert_hard_error(row)
+        self.assertIn("could not be fetched", row["detail"])
 
     @patch.object(MetadataComparator, "compare_all")
-    @patch.object(MetadataComparator, "_fetch_latest_rev", return_value="07")
-    def test_fix_bumps_rev_to_latest(self, _fetch, mock_compare_all):
-        rfc = RfcToBeFactory(rev="05")
+    @patch.object(MetadataComparator, "_fetch_latest_rev", return_value="16")
+    def test_fix_sets_rev_to_agreed_value(self, _fetch, mock_compare_all):
+        rfc = RfcToBeFactory(rev="15", draft__name=self.DRAFT)
         mock_compare_all.return_value = [
             {"field": "revision", "is_match": False, "can_fix": True}
         ]
-        Metadata.update_metadata(rfc, {})
+        Metadata.update_metadata(rfc, {"doc_name": f"{self.DRAFT}-16"})
         rfc.refresh_from_db()
-        self.assertEqual(rfc.rev, "07")
+        self.assertEqual(rfc.rev, "16")
+
+    @patch.object(MetadataComparator, "compare_all")
+    @patch.object(MetadataComparator, "_fetch_latest_rev", return_value="17")
+    def test_fix_is_skipped_when_sources_disagree(self, _fetch, mock_compare_all):
+        rfc = RfcToBeFactory(rev="15", draft__name=self.DRAFT)
+        mock_compare_all.return_value = [
+            {"field": "revision", "is_match": False, "can_fix": True}
+        ]
+        Metadata.update_metadata(rfc, {"doc_name": f"{self.DRAFT}-16"})
+        rfc.refresh_from_db()
+        self.assertEqual(rfc.rev, "15")

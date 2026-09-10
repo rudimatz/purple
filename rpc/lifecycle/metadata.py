@@ -158,6 +158,7 @@ class Metadata:
             "updates": updates,
             "publication_date": date,
             "subseries": subseries,
+            "doc_name": root.attrib.get("docName", ""),
         }
 
     @classmethod
@@ -197,7 +198,7 @@ class Metadata:
                             updated_fields["abstract"] = new_abstract
 
                     elif field == "revision":
-                        new_rev = comparator.latest_rev
+                        new_rev = comparator.agreed_rev
                         if new_rev:
                             rfctobe.rev = new_rev
                             rfctobe.save(update_fields=["rev"])
@@ -450,38 +451,73 @@ class MetadataComparator:
             self.compare_abstract(),
         ]
 
-    def compare_revision(self):
-        """Compare the working revision against the datatracker's latest.
+    @cached_property
+    def _doc_name_rev(self) -> tuple[str | None, str]:
+        """(rev, "") from a docName of "<draft name>-<rev>", else (None, why)."""
+        doc_name = self.xml_metadata.get("doc_name") or ""
+        draft_name = getattr(self.rfc_to_be.draft, "name", None)
+        if not doc_name:
+            return None, "RFCXML docName not recorded; redo metadata validation."
+        if not draft_name:
+            return None, "No draft is linked to compare the docName against."
+        if not doc_name.startswith(f"{draft_name}-"):
+            return None, f"RFCXML docName {doc_name} is not for draft {draft_name}."
+        rev = doc_name.removeprefix(f"{draft_name}-")
+        if not rev.isdigit():
+            return None, f"RFCXML docName {doc_name} has no revision suffix."
+        return rev, ""
 
-        An out-of-date rev is an error (it blocks publication); the fix bumps
-        rfc_to_be.rev to the datatracker's latest. If the latest can't be fetched
-        we stay silent rather than block on a transient datatracker failure.
+    @cached_property
+    def agreed_rev(self):
+        """The revision when the RFCXML and datatracker agree, else None."""
+        xml_rev, _ = self._doc_name_rev
+        dt_rev = self.latest_rev
+        if xml_rev and dt_rev and xml_rev == dt_rev:
+            return xml_rev
+        return None
+
+    def compare_revision(self):
+        """Check the RFCXML rev against the datatracker, then the database.
+
+        Any disagreement or uncertainty between RFCXML and datatracker is a
+        hard error: nothing is auto-fixable until a publisher has looked at it.
+        Only when they agree is a stale rfc_to_be.rev offered as a fix.
         """
         db_value = self.rfc_to_be.rev or ""
-        latest = self.latest_rev
-        if latest is None:
-            return {
-                "field": "revision",
-                "db_value": db_value,
-                "xml_value": "",
-                "is_match": True,
+        xml_rev, xml_problem = self._doc_name_rev
+        dt_rev = self.latest_rev
+        row = {"field": "revision", "db_value": db_value, "xml_value": xml_rev or ""}
+
+        if self.agreed_rev is None:
+            problems = [xml_problem] if xml_problem else []
+            if dt_rev is None:
+                problems.append(
+                    "The datatracker's latest revision could not be fetched."
+                )
+            elif xml_rev:
+                problems.append(
+                    f"RFCXML is -{xml_rev} but the datatracker's latest is -{dt_rev}."
+                )
+            else:
+                problems.append(f"The datatracker's latest is -{dt_rev}.")
+            problems.append("A publisher must resolve this before publishing.")
+            return row | {
+                "is_match": False,
                 "can_fix": False,
-                "is_error": False,
-                "detail": "Could not fetch the latest revision from the datatracker.",
+                "is_error": True,
+                "detail": " ".join(problems),
             }
-        is_match = db_value == latest
-        return {
-            "field": "revision",
-            "db_value": db_value,
-            "xml_value": latest,
+
+        is_match = db_value == self.agreed_rev
+        return row | {
             "is_match": is_match,
             "can_fix": True,
             "is_error": not is_match,
             "detail": (
                 ""
                 if is_match
-                else f"Working on {db_value or '(none)'}, but the datatracker's "
-                f"latest is {latest}."
+                else f"Working on -{db_value or '(none)'}; RFCXML and datatracker "
+                f"both say -{self.agreed_rev}."
             ),
         }
 
