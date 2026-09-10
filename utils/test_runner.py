@@ -1,19 +1,35 @@
 # Copyright The IETF Trust 2026, All Rights Reserved
-"""Test runner that keeps log output off the console"""
+"""Test runner that shows log output only for failing tests"""
 
 import logging
+import sys
 
 from django.test.runner import DiscoverRunner
 
 
-class QuietLogsRunner(DiscoverRunner):
-    """Silence configured log handlers while tests run; --show-logs restores them.
+class _SysStream:
+    """Resolve sys.stdout/sys.stderr on every write so buffer mode can swap them."""
 
-    Handlers are raised rather than loggers so assertLogs, which attaches its own
-    handler, keeps working regardless of the active LOGGING config.
+    def __init__(self, name):
+        self._name = name
+
+    def write(self, s):
+        return getattr(sys, self._name).write(s)
+
+    def flush(self):
+        getattr(sys, self._name).flush()
+
+
+class QuietLogsRunner(DiscoverRunner):
+    """Buffer per-test output, printing it only under failures; --show-logs shows all.
+
+    StreamHandler binds its stream at logging setup, before unittest's buffering
+    replaces sys.stderr, so console handlers are re-pointed at a lazy proxy.
     """
 
     def __init__(self, *, show_logs=False, **kwargs):
+        if not show_logs:
+            kwargs["buffer"] = True
         super().__init__(**kwargs)
         self.show_logs = show_logs
 
@@ -23,7 +39,7 @@ class QuietLogsRunner(DiscoverRunner):
         parser.add_argument(
             "--show-logs",
             action="store_true",
-            help="Let log output reach the console during tests.",
+            help="Print log output from every test, not just failing ones.",
         )
 
     def setup_test_environment(self, **kwargs):
@@ -32,4 +48,8 @@ class QuietLogsRunner(DiscoverRunner):
             return
         for logger in (logging.root, *logging.root.manager.loggerDict.values()):
             for handler in getattr(logger, "handlers", ()):
-                handler.setLevel(logging.CRITICAL + 1)
+                stream = getattr(handler, "stream", None)
+                if stream is sys.stderr:
+                    handler.setStream(_SysStream("stderr"))
+                elif stream is sys.stdout:
+                    handler.setStream(_SysStream("stdout"))
