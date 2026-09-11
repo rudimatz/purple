@@ -10,6 +10,7 @@ from itertools import zip_longest
 from typing import Any
 
 from django.db import transaction
+from rpcapi_client.exceptions import NotFoundException
 
 from datatracker.rpcapi import with_rpcapi
 from rpc.models import (
@@ -198,7 +199,7 @@ class Metadata:
                             updated_fields["abstract"] = new_abstract
 
                     elif field == "revision":
-                        new_rev = comparator.agreed_rev
+                        new_rev = comparison.get("xml_value")
                         if new_rev:
                             rfctobe.rev = new_rev
                             rfctobe.save(update_fields=["rev"])
@@ -403,23 +404,17 @@ class MetadataComparator:
         self.xml_metadata = xml_metadata
 
     @cached_property
-    def latest_rev(self):
-        """The draft's latest revision per the datatracker, or None if unavailable."""
-        return self._fetch_latest_rev()
-
     @with_rpcapi
-    def _fetch_latest_rev(self, *, rpcapi):
+    def _datatracker_rev(self, *, rpcapi) -> tuple[str | None, str]:
+        """The datatracker's latest rev as (rev, ""), or (None, problem) if unknown."""
         draft = self.rfc_to_be.draft
-        datatracker_id = getattr(draft, "datatracker_id", None)
-        if datatracker_id is None:
-            return None
         try:
-            return rpcapi.get_draft_by_id(datatracker_id).rev
+            return rpcapi.get_draft_by_id(draft.datatracker_id).rev, ""
+        except NotFoundException:
+            return None, f"The datatracker has no draft {draft.name}."
         except Exception:
-            logger.exception(
-                "Failed to fetch latest revision for draft %s", datatracker_id
-            )
-            return None
+            logger.exception("Datatracker call failed fetching rev of %s", draft.name)
+            return None, "The datatracker API call failed; retry before publishing."
 
     def compare_all(self):
         """
@@ -453,52 +448,41 @@ class MetadataComparator:
 
     @cached_property
     def _doc_name_rev(self) -> tuple[str | None, str]:
-        """(rev, "") from a docName of "<draft name>-<rev>", else (None, why)."""
+        """The RFCXML rev as (rev, ""), or (None, problem) if docName is unusable."""
         doc_name = self.xml_metadata.get("doc_name") or ""
-        draft_name = getattr(self.rfc_to_be.draft, "name", None)
         if not doc_name:
             return None, "RFCXML docName not recorded; redo metadata validation."
-        if not draft_name:
-            return None, "No draft is linked to compare the docName against."
-        if not doc_name.startswith(f"{draft_name}-"):
-            return None, f"RFCXML docName {doc_name} is not for draft {draft_name}."
-        rev = doc_name.removeprefix(f"{draft_name}-")
+        draft = self.rfc_to_be.draft
+        if draft is None:
+            rev = doc_name.rpartition("-")[2]
+        elif doc_name.startswith(f"{draft.name}-"):
+            rev = doc_name.removeprefix(f"{draft.name}-")
+        else:
+            return None, f"RFCXML docName {doc_name} is not for draft {draft.name}."
         if not rev.isdigit():
             return None, f"RFCXML docName {doc_name} has no revision suffix."
         return rev, ""
 
-    @cached_property
-    def agreed_rev(self):
-        """The revision when the RFCXML and datatracker agree, else None."""
-        xml_rev, _ = self._doc_name_rev
-        dt_rev = self.latest_rev
-        if xml_rev and dt_rev and xml_rev == dt_rev:
-            return xml_rev
-        return None
-
     def compare_revision(self):
         """Compare the RFCXML rev with the datatracker's, then with the database.
 
-        Unknown counts as disagreement
+        A datatracker failure is a blocking error.
         """
         db_value = self.rfc_to_be.rev or ""
         xml_rev, xml_problem = self._doc_name_rev
-        dt_rev = self.latest_rev
+        dt_rev, dt_problem = (
+            self._datatracker_rev if self.rfc_to_be.draft is not None else (None, "")
+        )
         row = {"field": "revision", "db_value": db_value, "xml_value": xml_rev or ""}
-
-        if self.agreed_rev is None:
-            problems = [xml_problem] if xml_problem else []
-            if dt_rev is None:
-                problems.append(
-                    "The datatracker's latest revision could not be fetched."
-                )
-            elif xml_rev:
-                problems.append(
-                    f"RFCXML is -{xml_rev} but the datatracker's latest is -{dt_rev}."
-                )
-            else:
-                problems.append(f"The datatracker's latest is -{dt_rev}.")
-            problems.append("A publisher must resolve this before publishing.")
+        problems = [p for p in (xml_problem, dt_problem) if p]
+        if dt_rev and xml_problem:
+            problems.append(f"The datatracker's latest is -{dt_rev}.")
+        elif dt_rev and xml_rev != dt_rev:
+            problems.append(
+                f"RFCXML is -{xml_rev} but the datatracker's latest is -{dt_rev}."
+            )
+        if problems:
+            problems.append("The publisher must resolve this before publishing.")
             return row | {
                 "is_match": False,
                 "can_fix": False,
@@ -506,7 +490,7 @@ class MetadataComparator:
                 "detail": " ".join(problems),
             }
 
-        is_match = db_value == self.agreed_rev
+        is_match = db_value == xml_rev
         return row | {
             "is_match": is_match,
             "can_fix": True,
@@ -514,8 +498,12 @@ class MetadataComparator:
             "detail": (
                 ""
                 if is_match
-                else f"Working on -{db_value or '(none)'}; RFCXML and datatracker "
-                f"both say -{self.agreed_rev}."
+                else f"Working on -{db_value or '(none)'}; "
+                + (
+                    f"RFCXML and datatracker both say -{xml_rev}."
+                    if dt_rev
+                    else f"the RFCXML says -{xml_rev}."
+                )
             ),
         }
 

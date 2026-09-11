@@ -1,8 +1,9 @@
 # Copyright The IETF Trust 2026, All Rights Reserved
 import xml.etree.ElementTree as ET
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
+from rpcapi_client.exceptions import NotFoundException
 
 from rpc.factories import RfcToBeFactory
 
@@ -216,16 +217,21 @@ class ParseDocNameTests(TestCase):
 
 
 class CompareRevisionTests(TestCase):
-    """Document and datatracker must agree before the database rev is judged."""
+    """RFCXML and datatracker must agree before the database rev is judged."""
 
     DRAFT = "draft-ietf-foo-bar"
 
-    def _row(self, rev, *, doc_name, latest):
+    def _row(self, rev, *, doc_name, latest=None, dt_problem="", draft=True):
         rfc = RfcToBeFactory(rev=rev, draft__name=self.DRAFT)
+        if not draft:
+            rfc.draft = None
         comparator = MetadataComparator(rfc, {"title": rfc.title, "doc_name": doc_name})
         # Bypass the datatracker fetch by priming the cached_property.
-        comparator.__dict__["latest_rev"] = latest
-        return comparator.compare_revision()
+        if draft:
+            comparator.__dict__["_datatracker_rev"] = (latest, dt_problem)
+            return comparator.compare_revision()
+        with patch("datatracker.rpcapi.get_rpcapi_client", side_effect=AssertionError):
+            return comparator.compare_revision()
 
     def _assert_hard_error(self, row):
         self.assertFalse(row["is_match"])
@@ -246,6 +252,24 @@ class CompareRevisionTests(TestCase):
         self.assertEqual(row["db_value"], "15")
         self.assertEqual(row["xml_value"], "16")
 
+    def test_no_draft_compares_xml_with_database_only(self):
+        row = self._row("16", doc_name="draft-whatever-16", draft=False)
+        self.assertTrue(row["is_match"])
+        self.assertFalse(row["is_error"])
+
+    def test_no_draft_stale_database_is_fixable(self):
+        row = self._row("15", doc_name="draft-whatever-16", draft=False)
+        self.assertFalse(row["is_match"])
+        self.assertTrue(row["is_error"])
+        self.assertTrue(row["can_fix"])
+        self.assertEqual(row["xml_value"], "16")
+        self.assertIn("the RFCXML says -16", row["detail"])
+
+    def test_no_draft_with_unusable_doc_name_blocks(self):
+        row = self._row("16", doc_name="draft-whatever-final", draft=False)
+        self._assert_hard_error(row)
+        self.assertIn("no revision suffix", row["detail"])
+
     def test_document_and_datatracker_disagree(self):
         row = self._row("16", doc_name=f"{self.DRAFT}-16", latest="17")
         self._assert_hard_error(row)
@@ -256,6 +280,7 @@ class CompareRevisionTests(TestCase):
         row = self._row("16", doc_name="draft-someone-else-16", latest="16")
         self._assert_hard_error(row)
         self.assertIn("not for draft", row["detail"])
+        self.assertIn("latest is -16", row["detail"])
         self.assertEqual(row["xml_value"], "")
 
     def test_doc_name_without_revision_suffix(self):
@@ -268,29 +293,36 @@ class CompareRevisionTests(TestCase):
         self._assert_hard_error(row)
         self.assertIn("docName not recorded", row["detail"])
 
-    def test_unfetchable_latest_blocks(self):
-        row = self._row("16", doc_name=f"{self.DRAFT}-16", latest=None)
+    def test_datatracker_problem_is_reported_verbatim(self):
+        row = self._row("16", doc_name=f"{self.DRAFT}-16", dt_problem="DT-PROBLEM")
         self._assert_hard_error(row)
-        self.assertIn("could not be fetched", row["detail"])
+        self.assertIn("DT-PROBLEM", row["detail"])
+
+    def _datatracker_rev(self, rfc, rpcapi):
+        with patch("datatracker.rpcapi.get_rpcapi_client", return_value=rpcapi):
+            return MetadataComparator(rfc, {})._datatracker_rev
+
+    def test_datatracker_rev_distinguishes_unknown_draft_from_api_failure(self):
+        rfc = RfcToBeFactory(draft__name=self.DRAFT)
+        rpcapi = MagicMock()
+        rpcapi.get_draft_by_id.return_value.rev = "16"
+        self.assertEqual(self._datatracker_rev(rfc, rpcapi), ("16", ""))
+        rpcapi.get_draft_by_id.side_effect = NotFoundException()
+        rev, problem = self._datatracker_rev(rfc, rpcapi)
+        self.assertIsNone(rev)
+        self.assertIn(f"has no draft {self.DRAFT}", problem)
+        rpcapi.get_draft_by_id.side_effect = RuntimeError("boom")
+        with self.assertLogs("rpc.lifecycle.metadata", level="ERROR"):
+            rev, problem = self._datatracker_rev(rfc, rpcapi)
+        self.assertIsNone(rev)
+        self.assertIn("API call failed", problem)
 
     @patch.object(MetadataComparator, "compare_all")
-    @patch.object(MetadataComparator, "_fetch_latest_rev", return_value="16")
-    def test_fix_sets_rev_to_agreed_value(self, _fetch, mock_compare_all):
+    def test_fix_sets_rev_to_agreed_value(self, mock_compare_all):
         rfc = RfcToBeFactory(rev="15", draft__name=self.DRAFT)
         mock_compare_all.return_value = [
-            {"field": "revision", "is_match": False, "can_fix": True}
+            {"field": "revision", "is_match": False, "can_fix": True, "xml_value": "16"}
         ]
         Metadata.update_metadata(rfc, {"doc_name": f"{self.DRAFT}-16"})
         rfc.refresh_from_db()
         self.assertEqual(rfc.rev, "16")
-
-    @patch.object(MetadataComparator, "compare_all")
-    @patch.object(MetadataComparator, "_fetch_latest_rev", return_value="17")
-    def test_fix_is_skipped_when_sources_disagree(self, _fetch, mock_compare_all):
-        rfc = RfcToBeFactory(rev="15", draft__name=self.DRAFT)
-        mock_compare_all.return_value = [
-            {"field": "revision", "is_match": False, "can_fix": True}
-        ]
-        Metadata.update_metadata(rfc, {"doc_name": f"{self.DRAFT}-16"})
-        rfc.refresh_from_db()
-        self.assertEqual(rfc.rev, "15")
