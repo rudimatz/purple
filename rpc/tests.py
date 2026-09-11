@@ -749,8 +749,13 @@ class NotificationTests(TestCase):
             self.assertIn(resp.status_code, (401, 403), (path, resp.status_code))
 
 
-class AuthEnforcementTests(TestCase):
-    """Guard against a regression that opens the API to anonymous users."""
+class DefaultPermissionTests(TestCase):
+    """Guard against a regression that opens the API to anonymous users.
+
+    Deliberately checks only each rpc_router viewset's -list route, which always
+    exists and is cheap to call. Endpoints outside the router, other actions, and
+    views with their own permission_classes need their own test next to these.
+    """
 
     def test_default_permission_is_authenticated(self):
         from django.conf import settings
