@@ -12,7 +12,7 @@ from typing import Any
 from django.db import transaction
 from rpcapi_client.exceptions import NotFoundException
 
-from datatracker.rpcapi import with_rpcapi
+from datatracker.rpcapi import datatracker_api, with_rpcapi
 from rpc.models import (
     DocRelationshipName,
     RfcToBe,
@@ -22,6 +22,14 @@ from rpc.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class RfcxmlRevError(ValueError):
+    """The RFCXML docName gives no revision for this draft."""
+
+
+class DatatrackerInconsistency(Exception):
+    """A linked draft is missing from the datatracker or has no revision there."""
 
 
 def _already_parenthesized(s: str) -> bool:
@@ -405,16 +413,21 @@ class MetadataComparator:
 
     @cached_property
     @with_rpcapi
-    def _datatracker_rev(self, *, rpcapi) -> tuple[str | None, str]:
-        """The datatracker's latest rev as (rev, ""), or (None, problem) if unknown."""
+    def _datatracker_rev(self, *, rpcapi) -> str:
+        """The draft's latest rev per the datatracker."""
         draft = self.rfc_to_be.draft
-        try:
-            return rpcapi.get_draft_by_id(draft.datatracker_id).rev, ""
-        except NotFoundException:
-            return None, f"The datatracker has no draft {draft.name}."
-        except Exception:
-            logger.exception("Datatracker call failed fetching rev of %s", draft.name)
-            return None, "The datatracker API call failed; retry before publishing."
+        with datatracker_api():
+            try:
+                rev = rpcapi.get_draft_by_id(draft.datatracker_id).rev
+            except NotFoundException:
+                raise DatatrackerInconsistency(
+                    f"Datatracker has no draft {draft.name} (id {draft.datatracker_id})"
+                ) from None
+        if not rev:
+            raise DatatrackerInconsistency(
+                f"Datatracker draft {draft.name} has no revision"
+            )
+        return rev
 
     def compare_all(self):
         """
@@ -446,48 +459,52 @@ class MetadataComparator:
             self.compare_abstract(),
         ]
 
-    @cached_property
-    def _doc_name_rev(self) -> tuple[str | None, str]:
-        """The RFCXML rev as (rev, ""), or (None, problem) if docName is unusable."""
+    def _rfcxml_rev(self) -> str:
+        """The rev from the RFCXML docName, "<draft name>-<rev>"."""
         doc_name = self.xml_metadata.get("doc_name") or ""
         if not doc_name:
-            return None, "RFCXML docName not recorded; redo metadata validation."
+            raise RfcxmlRevError(
+                "RFCXML docName not recorded; redo metadata validation."
+            )
         draft = self.rfc_to_be.draft
         if draft is None:
             rev = doc_name.rpartition("-")[2]
         elif doc_name.startswith(f"{draft.name}-"):
             rev = doc_name.removeprefix(f"{draft.name}-")
         else:
-            return None, f"RFCXML docName {doc_name} is not for draft {draft.name}."
+            raise RfcxmlRevError(
+                f"RFCXML docName {doc_name} is not for draft {draft.name}."
+            )
         if not rev.isdigit():
-            return None, f"RFCXML docName {doc_name} has no revision suffix."
-        return rev, ""
+            raise RfcxmlRevError(f"RFCXML docName {doc_name} has no revision suffix.")
+        return rev
 
     def compare_revision(self):
-        """Compare the RFCXML rev with the datatracker's, then with the database.
-
-        A datatracker failure is a blocking error.
-        """
+        """Compare the RFCXML rev with the datatracker's, then with the database."""
         db_value = self.rfc_to_be.rev or ""
-        xml_rev, xml_problem = self._doc_name_rev
-        dt_rev, dt_problem = (
-            self._datatracker_rev if self.rfc_to_be.draft is not None else (None, "")
-        )
+        problems = []
+        try:
+            xml_rev = self._rfcxml_rev()
+        except RfcxmlRevError as e:
+            xml_rev = None
+            problems.append(str(e))
+        dt_rev = self._datatracker_rev if self.rfc_to_be.draft is not None else None
         row = {"field": "revision", "db_value": db_value, "xml_value": xml_rev or ""}
-        problems = [p for p in (xml_problem, dt_problem) if p]
-        if dt_rev and xml_problem:
+
+        if dt_rev and not xml_rev:
             problems.append(f"The datatracker's latest is -{dt_rev}.")
         elif dt_rev and xml_rev != dt_rev:
             problems.append(
                 f"RFCXML is -{xml_rev} but the datatracker's latest is -{dt_rev}."
             )
         if problems:
-            problems.append("The publisher must resolve this before publishing.")
             return row | {
                 "is_match": False,
                 "can_fix": False,
                 "is_error": True,
-                "detail": " ".join(problems),
+                "detail": " ".join(
+                    [*problems, "The publisher must resolve this before publishing."]
+                ),
             }
 
         is_match = db_value == xml_rev

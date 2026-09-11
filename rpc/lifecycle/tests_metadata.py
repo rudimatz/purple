@@ -3,11 +3,13 @@ import xml.etree.ElementTree as ET
 from unittest.mock import MagicMock, patch
 
 from django.test import TestCase
-from rpcapi_client.exceptions import NotFoundException
+from rpcapi_client.exceptions import ApiException, NotFoundException
 
+from datatracker.rpcapi import DataTrackerUnavailable
 from rpc.factories import RfcToBeFactory
 
 from .metadata import (
+    DatatrackerInconsistency,
     Metadata,
     MetadataComparator,
     _already_parenthesized,
@@ -221,14 +223,14 @@ class CompareRevisionTests(TestCase):
 
     DRAFT = "draft-ietf-foo-bar"
 
-    def _row(self, rev, *, doc_name, latest=None, dt_problem="", draft=True):
+    def _row(self, rev, *, doc_name, latest=None, draft=True):
         rfc = RfcToBeFactory(rev=rev, draft__name=self.DRAFT)
         if not draft:
             rfc.draft = None
         comparator = MetadataComparator(rfc, {"title": rfc.title, "doc_name": doc_name})
         # Bypass the datatracker fetch by priming the cached_property.
         if draft:
-            comparator.__dict__["_datatracker_rev"] = (latest, dt_problem)
+            comparator.__dict__["_datatracker_rev"] = latest
             return comparator.compare_revision()
         with patch("datatracker.rpcapi.get_rpcapi_client", side_effect=AssertionError):
             return comparator.compare_revision()
@@ -293,29 +295,33 @@ class CompareRevisionTests(TestCase):
         self._assert_hard_error(row)
         self.assertIn("docName not recorded", row["detail"])
 
-    def test_datatracker_problem_is_reported_verbatim(self):
-        row = self._row("16", doc_name=f"{self.DRAFT}-16", dt_problem="DT-PROBLEM")
-        self._assert_hard_error(row)
-        self.assertIn("DT-PROBLEM", row["detail"])
+    def test_datatracker_failure_is_a_503(self):
+        rfc = RfcToBeFactory(rev="16", draft__name=self.DRAFT)
+        rpcapi = MagicMock()
+        rpcapi.get_draft_by_id.side_effect = ApiException(status=500)
+        with (
+            patch("datatracker.rpcapi.get_rpcapi_client", return_value=rpcapi),
+            self.assertRaises(DataTrackerUnavailable),
+        ):
+            MetadataComparator(rfc, {"doc_name": f"{self.DRAFT}-16"}).compare_revision()
 
     def _datatracker_rev(self, rfc, rpcapi):
         with patch("datatracker.rpcapi.get_rpcapi_client", return_value=rpcapi):
             return MetadataComparator(rfc, {})._datatracker_rev
 
-    def test_datatracker_rev_distinguishes_unknown_draft_from_api_failure(self):
+    def test_datatracker_rev_raises_for_missing_draft_or_rev(self):
         rfc = RfcToBeFactory(draft__name=self.DRAFT)
         rpcapi = MagicMock()
         rpcapi.get_draft_by_id.return_value.rev = "16"
-        self.assertEqual(self._datatracker_rev(rfc, rpcapi), ("16", ""))
+        self.assertEqual(self._datatracker_rev(rfc, rpcapi), "16")
+        rpcapi.get_draft_by_id.return_value.rev = ""
+        with self.assertRaisesRegex(DatatrackerInconsistency, "has no revision"):
+            self._datatracker_rev(rfc, rpcapi)
         rpcapi.get_draft_by_id.side_effect = NotFoundException()
-        rev, problem = self._datatracker_rev(rfc, rpcapi)
-        self.assertIsNone(rev)
-        self.assertIn(f"has no draft {self.DRAFT}", problem)
-        rpcapi.get_draft_by_id.side_effect = RuntimeError("boom")
-        with self.assertLogs("rpc.lifecycle.metadata", level="ERROR"):
-            rev, problem = self._datatracker_rev(rfc, rpcapi)
-        self.assertIsNone(rev)
-        self.assertIn("API call failed", problem)
+        with self.assertRaisesRegex(
+            DatatrackerInconsistency, f"has no draft {self.DRAFT}"
+        ):
+            self._datatracker_rev(rfc, rpcapi)
 
     @patch.object(MetadataComparator, "compare_all")
     def test_fix_sets_rev_to_agreed_value(self, mock_compare_all):
